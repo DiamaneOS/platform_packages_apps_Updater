@@ -7,6 +7,7 @@ import android.app.job.JobService;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Network;
 import android.os.PersistableBundle;
 import android.os.SystemProperties;
@@ -20,6 +21,9 @@ public class PeriodicJob extends JobService {
     private static final int JOB_ID_RETRY = 2;
     private static final long INTERVAL_MILLIS = 6 * 60 * 60 * 1000;
     private static final long MIN_LATENCY_MILLIS = 4 * 60 * 1000;
+    // Consecutive failed automatic attempts. Each retry waits twice as long as the one before,
+    // up to the periodic interval, so an unreachable server is not asked every few minutes.
+    private static final String PREFERENCE_FAILED_ATTEMPTS = "failed_attempts";
     private static final String EXTRA_JOB_CHANNEL = "extra_job_channel";
 
     static void schedule(final Context context) {
@@ -56,17 +60,26 @@ public class PeriodicJob extends JobService {
     }
 
     static void scheduleRetry(final Context context) {
+        final SharedPreferences preferences = Settings.getPreferences(context);
+        final int failures = preferences.getInt(PREFERENCE_FAILED_ATTEMPTS, 0);
+        preferences.edit().putInt(PREFERENCE_FAILED_ATTEMPTS, failures + 1).apply();
+        final long latency = Math.min(MIN_LATENCY_MILLIS << Math.min(failures, 16), INTERVAL_MILLIS);
+        Log.d(TAG, "Retry after failed attempt " + (failures + 1) + " in " + latency / 1000 + " s");
         final JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         final ComponentName serviceName = new ComponentName(context, PeriodicJob.class);
         final int result = scheduler.schedule(new JobInfo.Builder(JOB_ID_RETRY, serviceName)
             .setRequiredNetworkType(Settings.getNetworkType(context))
             .setRequiresBatteryNotLow(Settings.getBatteryNotLow(context))
             .setRequiresCharging(Settings.getRequiresCharging(context))
-            .setMinimumLatency(MIN_LATENCY_MILLIS)
+            .setMinimumLatency(latency)
             .build());
         if (result == JobScheduler.RESULT_FAILURE) {
             Log.d(TAG, "Retry job schedule failed");
         }
+    }
+
+    static void resetRetryDelay(final Context context) {
+        Settings.getPreferences(context).edit().remove(PREFERENCE_FAILED_ATTEMPTS).apply();
     }
 
     static void cancel(final Context context) {

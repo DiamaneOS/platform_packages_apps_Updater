@@ -25,6 +25,8 @@
     <string name="notification_failed_verify_text">The latest update downloaded from the server failed to pass verification. The update system will try again later. The download will be performed again.</string>
     <string name="notification_failed_install_title">Failed to install update</string>
     <string name="notification_failed_install_text">The latest update passed verification but installation failed. The update system will try again later.</string>
+    <string name="notification_untrusted_build_title">Updates won\'t be installed</string>
+    <string name="notification_untrusted_build_text">This build is signed with Android\'s public test keys, so anyone could sign an update it would accept. The update system checks for updates but won\'t download or install them.</string>
     <string name="notification_set_security_preview_title">Security preview releases</string>
     <string name="notification_set_security_preview_text">Tap to choose whether to opt into security preview releases</string>
     <string name="settings_title">System update</string>
@@ -48,6 +50,7 @@
     <string name="idle_reboot_summary_off">Don\'t automatically reboot once the device is idle after successfully installing an update</string>
     <string name="check_for_updates_title">Check for updates</string>
     <string name="check_for_updates_summary">Tap to check for updates</string>
+    <string name="check_for_updates_summary_untrusted_build">Tap to check for updates. This build is signed with public test keys, so updates won\'t be downloaded or installed</string>
     <string name="notification_settings_title">Notification settings</string>
     <string name="notification_settings_summary">Modify notification channel settings</string>
     <string name="use_security_preview_channel_title">Receive security preview releases</string>

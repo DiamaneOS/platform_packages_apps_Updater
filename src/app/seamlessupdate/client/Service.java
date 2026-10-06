@@ -31,6 +31,7 @@ import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
 import java.util.concurrent.CountDownLatch;
@@ -55,6 +56,8 @@ public class Service extends IntentService {
     private static final String PREFERENCE_FAILED_INCREMENTAL = "failed_incremental";
     private static final int HTTP_RANGE_NOT_SATISFIABLE = 416;
     private static final int UPDATE_ENGINE_DOWNLOAD_STATE_INITIALIZATION_ERROR = 20;
+    // Update information is one short line; anything longer is not from an update server.
+    private static final int MAX_METADATA_BYTES = 4096;
 
     private final ModernTLSSocketFactory tlsSocketFactory = new ModernTLSSocketFactory();
 
@@ -250,6 +253,24 @@ public class Service extends IntentService {
         }
     }
 
+    // A server that answers with anything but update information (a web page, say) fails the
+    // check like an unreachable one, instead of crashing the service.
+    private static String[] readMetadata(final HttpsURLConnection connection) throws IOException {
+        final byte[] body;
+        try (final InputStream input = connection.getInputStream()) {
+            body = input.readNBytes(MAX_METADATA_BYTES + 1);
+        }
+        if (body.length > MAX_METADATA_BYTES) {
+            throw new IOException("update information is larger than " + MAX_METADATA_BYTES + " bytes");
+        }
+        final String line = new String(body, StandardCharsets.UTF_8).split("\n", 2)[0].trim();
+        final String[] metadata = line.split(" ");
+        if (metadata.length < 4 || !metadata[1].matches("[0-9]{1,18}")) {
+            throw new IOException("malformed update information from the update server");
+        }
+        return metadata;
+    }
+
     private void annoyUser() {
         PeriodicJob.cancel(this);
         PeriodicJob.resetRetryDelay(this);
@@ -300,10 +321,7 @@ public class Service extends IntentService {
             if (metadataResponse != HTTP_OK) {
                 throw new IOException("update server answered HTTP " + metadataResponse + " for " + connection.getURL());
             }
-            final String[] metadata;
-            try (final BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                metadata = reader.readLine().split(" ");
-            }
+            final String[] metadata = readMetadata(connection);
 
             final String targetIncremental = metadata[0];
             final long targetBuildDate = Long.parseLong(metadata[1]);

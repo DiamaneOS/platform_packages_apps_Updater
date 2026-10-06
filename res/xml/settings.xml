@@ -18,7 +18,9 @@
                 app:entryValues="@array/channel_values"
                 app:defaultValue="@string/channel_default" />
 
+        <!-- DiamaneOS publishes no security preview releases. -->
         <SwitchPreferenceCompat app:key="use_security_preview_channel"
+                app:isPreferenceVisible="false"
                 app:persistent="false"
                 app:title="@string/use_security_preview_channel_title"
                 app:summaryOn="@string/use_security_preview_channel_summary_on"

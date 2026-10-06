@@ -21,6 +21,7 @@ import android.os.storage.StorageManager;
 import android.util.Log;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
+import static java.net.HttpURLConnection.HTTP_OK;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -266,6 +267,7 @@ public class Service extends IntentService {
 
     private void annoyUser() {
         PeriodicJob.cancel(this);
+        PeriodicJob.resetRetryDelay(this);
         final SharedPreferences preferences = Settings.getPreferences(this);
         preferences.edit().putBoolean(Settings.KEY_WAITING_FOR_REBOOT, true).apply();
         if (Settings.getIdleReboot(this)) {
@@ -311,12 +313,17 @@ public class Service extends IntentService {
 
             Log.d(TAG, "fetching metadata for " + DEVICE + "-" + channel + " from " + route.server());
             connection = fetchData(network, DEVICE + "-" + channel);
+            final int metadataResponse = connection.getResponseCode();
+            if (metadataResponse != HTTP_OK) {
+                throw new IOException("update server answered HTTP " + metadataResponse + " for " + connection.getURL());
+            }
             final String[] metadata = readMetadata(connection);
 
             final String targetIncremental = metadata[0];
             final long targetBuildDate = Long.parseLong(metadata[1]);
             final long sourceBuildDate = SystemProperties.getLong("ro.build.date.utc", 0);
             if (!DownloadChecks.newer(metadata, DEVICE, channel, INCREMENTAL, sourceBuildDate)) {
+                PeriodicJob.resetRetryDelay(this);
                 notificationHandler.showUpdatedNotification(channel);
                 Log.d(TAG, "targetBuildDate: " + targetBuildDate + " not higher than sourceBuildDate: " + sourceBuildDate);
                 mUpdating = false;

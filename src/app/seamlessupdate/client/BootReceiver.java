@@ -14,10 +14,7 @@ public class BootReceiver extends BroadcastReceiver {
             final SharedPreferences preferences = Settings.getPreferences(context);
             preferences.edit().putBoolean(Settings.KEY_WAITING_FOR_REBOOT, false).apply();
             PeriodicJob.schedule(context);
-
-            if (!preferences.contains(Settings.KEY_USE_SECURITY_PREVIEW_CHANNEL)) {
-                NotificationHandler.showSetSecurityPreviewNotification(context);
-            }
+            // DiamaneOS publishes no security preview releases, so there is nothing to opt into.
         } else {
             context.getPackageManager().setApplicationEnabledSetting(context.getPackageName(),
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED, 0);

@@ -41,13 +41,9 @@ public class Settings extends CollapsingToolbarBaseActivity {
     }
 
     static String getChannel(final Context context) {
-        String base = getPreferences(context).getString(KEY_CHANNEL,
+        // DiamaneOS publishes no security preview releases: no -security-preview channels.
+        return getPreferences(context).getString(KEY_CHANNEL,
                 context.getString(R.string.channel_default));
-        if (shouldUseSecurityPreviewChannel(context)) {
-            return base + "-security-preview";
-        } else {
-            return base;
-        }
     }
 
     static boolean shouldUseSecurityPreviewChannel(final Context context) {

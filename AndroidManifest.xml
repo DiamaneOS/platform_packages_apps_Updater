@@ -75,7 +75,10 @@
             </intent-filter>
         </activity>
 
+        <!-- DiamaneOS publishes no security preview releases; disabled, so the setup
+             wizard skips its opt-in step. -->
         <activity android:name=".SecurityPreviewSettings"
+            android:enabled="false"
             android:launchMode="singleTop"
             android:label="@string/security_preview_settings_title"
             android:excludeFromRecents="true"

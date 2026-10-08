@@ -154,6 +154,7 @@ public class Service extends IntentService {
     private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
             final String targetIncremental) throws IOException, GeneralSecurityException {
         try {
+            ReleaseKeys.require();
             notificationHandler.showVerifyNotification(0);
             RecoverySystem.verifyPackage(UPDATE_PATH, (int progress) -> {
                 Log.d(TAG, "verifyPackage: " + progress + "%");
@@ -334,6 +335,9 @@ public class Service extends IntentService {
                 throw new GeneralSecurityException("targetChannel: " + targetChannel + " does not match channel: " + channel);
             }
 
+            // Never download an update this build could not tell from a forged one.
+            ReleaseKeys.require();
+
             notificationHandler.showDownloadNotification(0, 100);
 
             String downloadFile = preferences.getString(PREFERENCE_DOWNLOAD_FILE, null);
@@ -437,6 +441,12 @@ public class Service extends IntentService {
 
             Log.d(TAG, "download completed");
             onDownloadFinished(streaming, targetBuildDate, targetIncremental);
+        } catch (ReleaseKeys.UntrustedBuildException e) {
+            Log.w(TAG, "not downloading or installing updates: " + e.getMessage());
+            notificationHandler.showUntrustedBuildNotification();
+            mUpdating = false;
+            // A property of this build: a retry before the next periodic check changes nothing.
+            PeriodicJob.resetRetryDelay(this);
         } catch (GeneralSecurityException | IOException | ServiceSpecificException e) {
             Log.e(TAG, "failed to download and install update", e);
             notificationHandler.showFailureNotification(e.getMessage());

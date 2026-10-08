@@ -27,19 +27,21 @@ final class ReleaseKeys {
     private static final String TAG = "ReleaseKeys";
     private static final String OTA_CERTIFICATES = "/system/etc/security/otacerts.zip";
 
-    // SHA-256 of the DER certificates in build/make/target/product/security: the public test
-    // keys every build carries until it is signed with release keys.
-    private static final Set<String> PUBLIC_TEST_CERTIFICATES = Set.of(
-            "a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc", // testkey
-            "c8a2e9bccf597c2fb6dc66bee293fc13f2fc47ec77bc6b2b0d52c11f51192ab8", // platform
-            "28bbfe4a7b97e74681dc55c2fbb6ccb8d6c74963733f6af6ae74d8c3a6e879fd", // shared
-            "465983f7791f2abeb43ea2cbdc7f21a8260b72bc08a55c839fc1a43bc741a81e", // media
-            "e1dbadce60dc080d15b58a014b0dcf9400e24de23fa00b287a5a982bfebda2ee", // networkstack
-            "abf21f9e2af1d881cc673fddcefa6ed9c269a437bd64b279cf45844cfd589126", // sdk_sandbox
-            "a6ccc500ff0e7421200eb66a7fe174ef1b00e52ca91727070cbedf061ff76c35", // bluetooth
-            "fae9122a8721d6e2a196d2224dffcf773c9127e2bb956cbddb40b009192ffdfd", // nfc
-            "cb8b7b48f132174850cb584d34593f2f1679e94f53b99fc2404003b498365ebf", // gmscompat_lib
-            "ce7b2b47ae2b7552c8f92cc29124279883041fb623a5f194a82c9bf15d492aa0"  // cts_uicc_2021
+    // SHA-256 of the public keys (DER SubjectPublicKeyInfo) of the certificates in
+    // build/make/target/product/security: the public test keys every build carries until it is
+    // signed with release keys. The key, not the certificate: verification compares keys, so a
+    // new certificate for a public test key is still that key.
+    private static final Set<String> PUBLIC_TEST_KEYS = Set.of(
+            "ef57b690165cb561b5026922c00d2d6574e8b184fa7d161e076f06e06e6d35db", // testkey
+            "3d3df7dc9bf26e02d4cd76256d41d45e41a4dedebe7feb95c40e3697681be8a7", // platform
+            "2b59625f19b7d0d143a69fb7a02d42b151480ddfe60b0572070ac24afca212a0", // shared
+            "091377d6fd00e4e217b750571d45cbe1a32c7fa74075138fc529fdf162b5416f", // media
+            "7bfcc5541e9f18e3738b1d5fa0b8524d44bac99424cfdcc6594d9386d4daaf15", // networkstack
+            "d2e67bf7c0aaa67f3a4f7dc35dd2d45aa111a91e06a2cc517eaf9c249de31454", // sdk_sandbox
+            "de5b1ddc59331bbdeee26d6467dd4f9fc09719098ba7dcb6a973045781a0e36c", // bluetooth
+            "9318ca97d2c148ca94639603b68d0928068158113d23a1cfca30acc4df2cac37", // nfc
+            "838012d323ab15f0c93349a8e954b74be367350fc8f2cf151290efddaa37a22a", // gmscompat_lib
+            "4d850245247af73aaf72fe598c7c7ef73f618391d771763299d5f5139ca43f2c"  // cts_uicc_2021
     );
 
     private static volatile Boolean trusted;
@@ -88,8 +90,9 @@ final class ReleaseKeys {
                 try (final InputStream input = zip.getInputStream(entry)) {
                     for (final Certificate certificate : factory.generateCertificates(input)) {
                         count++;
-                        final String digest = HexFormat.of().formatHex(sha256.digest(certificate.getEncoded()));
-                        if (PUBLIC_TEST_CERTIFICATES.contains(digest)) {
+                        final String digest = HexFormat.of().formatHex(
+                                sha256.digest(certificate.getPublicKey().getEncoded()));
+                        if (PUBLIC_TEST_KEYS.contains(digest)) {
                             return OTA_CERTIFICATES + " trusts a public test key (" + entry.getName() + ")";
                         }
                     }

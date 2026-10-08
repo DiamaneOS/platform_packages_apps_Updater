@@ -234,6 +234,19 @@ public class NotificationHandler {
                 .build());
     }
 
+    void showUntrustedBuildNotification() {
+        final String text = service.getString(R.string.notification_untrusted_build_text);
+        notificationManager.notify(NOTIFICATION_ID_FAILURE, new Notification.Builder(service, NOTIFICATION_CHANNEL_ID_FAILURE)
+                .setContentIntent(getPendingSettingsIntent())
+                .setContentTitle(service.getString(R.string.notification_untrusted_build_title))
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle()
+                    .bigText(text))
+                .setShowWhen(true)
+                .setSmallIcon(R.drawable.security_update_warning_fill0_wght400_grad0_opsz48)
+                .build());
+    }
+
     private PendingIntent getPendingSettingsIntent() {
         return PendingIntent.getActivity(service, PENDING_SETTINGS_ID, new Intent(service,
                 Settings.class), PendingIntent.FLAG_IMMUTABLE);

@@ -28,6 +28,10 @@
         android:name="app.seamlessupdate.client.OPEN_SECURITY_PREVIEW_SETTINGS"
         android:protectionLevel="internal|setup" />
 
+    <queries>
+        <package android:name="com.android.settings" />
+    </queries>
+
     <application android:label="@string/app_name"
             android:name=".UpdaterApplication"
             android:icon="@mipmap/ic_launcher"

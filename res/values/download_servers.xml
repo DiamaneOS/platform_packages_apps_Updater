@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="download_servers_title">Download servers</string>
+    <string name="download_servers_summary">Choose the shared server for OS and Apps downloads in Network &amp; internet.</string>
+</resources>

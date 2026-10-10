@@ -2,7 +2,8 @@
 <network-security-config>
     <base-config cleartextTrafficPermitted="false"/>
     <domain-config>
-        <domain includeSubdomains="true">releases.diamaneos.de</domain>
+        <domain>releases.diamaneos.de</domain>
+        <domain>releases-na.diamaneos.de</domain>
         <!-- The update server uses Let's Encrypt certificates. Keep the expiration
              about three months ahead when releasing; after it, Android no longer
              enforces these pins. -->

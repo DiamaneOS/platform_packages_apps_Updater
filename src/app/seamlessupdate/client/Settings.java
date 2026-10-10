@@ -126,6 +126,15 @@ public class Settings extends CollapsingToolbarBaseActivity {
                 requirePreference(KEY_CHECK_FOR_UPDATES).setSummary(R.string.check_for_updates_summary_untrusted_build);
             }
 
+            requirePreference("download_servers").setOnPreferenceClickListener(pref -> {
+                try {
+                    startActivity(de.diamaneos.downloads.DownloadPolicyClient.settingsIntent(requireContext()));
+                } catch (android.content.ActivityNotFoundException | SecurityException e) {
+                    pref.setEnabled(false);
+                }
+                return true;
+            });
+
             requirePreference(KEY_CHECK_FOR_UPDATES).setOnPreferenceClickListener(pref -> {
                 final Context context = requireContext();
                 if (!getPreferences(context).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {

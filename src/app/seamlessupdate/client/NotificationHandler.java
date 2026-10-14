@@ -22,7 +22,7 @@ import static android.app.NotificationManager.IMPORTANCE_MIN;
 
 public class NotificationHandler {
     private static enum Phase {
-        CHECK, DOWNLOAD, VERIFY, INSTALL
+        CHECK, COPY, DOWNLOAD, VERIFY, INSTALL
     }
 
     private static final int NOTIFICATION_ID_PROGRESS = 1;
@@ -44,6 +44,8 @@ public class NotificationHandler {
     private final NotificationManager notificationManager;
 
     private Phase phase;
+    // A package the user picked: failures are not retried, so the texts differ.
+    private boolean local;
 
     NotificationHandler(Service service) {
         this.service = service;
@@ -104,8 +106,9 @@ public class NotificationHandler {
         return builder.build();
     }
 
-    void start() {
+    void start(final boolean local) {
         phase = Phase.CHECK;
+        this.local = local;
 
         // Avoid cancelling persistent security settings preview notification
         for (int id = 1; id <= MAX_NOTIFICATION_ID_FOR_SERVICE; id++) {
@@ -140,6 +143,12 @@ public class NotificationHandler {
                 .setShowWhen(true)
                 .setSmallIcon(R.drawable.security_update_good_fill0_wght400_grad0_opsz48)
                 .build());
+    }
+
+    void showCopyNotification(long progress, long max) {
+        phase = Phase.COPY;
+        notificationManager.notify(NOTIFICATION_ID_PROGRESS, buildProgressNotification(
+                com.android.internal.R.string.reboot_to_update_package, progress, max));
     }
 
     void showDownloadNotification(long progress, long max) {
@@ -205,6 +214,11 @@ public class NotificationHandler {
                 contentResId = R.string.notification_failed_check_text;
                 break;
 
+            case COPY:
+                titleResId = R.string.notification_failed_copy_title;
+                contentResId = R.string.notification_failed_local_text;
+                break;
+
             case DOWNLOAD:
                 titleResId = R.string.notification_failed_download_title;
                 contentResId = R.string.notification_failed_download_text;
@@ -212,12 +226,14 @@ public class NotificationHandler {
 
             case VERIFY:
                 titleResId = R.string.notification_failed_verify_title;
-                contentResId = R.string.notification_failed_verify_text;
+                contentResId = local ? R.string.notification_failed_local_text
+                        : R.string.notification_failed_verify_text;
                 break;
 
             default:
                 titleResId = R.string.notification_failed_install_title;
-                contentResId = R.string.notification_failed_install_text;
+                contentResId = local ? R.string.notification_failed_local_text
+                        : R.string.notification_failed_install_text;
         }
 
         String text = service.getString(contentResId) + "<br><br><tt>" + exceptionMessage + "</tt>";

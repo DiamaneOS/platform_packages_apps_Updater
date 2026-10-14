@@ -13,6 +13,8 @@ import android.view.MenuItem;
 import android.app.job.JobInfo;
 import android.app.AlertDialog;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
@@ -33,6 +35,7 @@ public class Settings extends CollapsingToolbarBaseActivity {
     private static final String KEY_REQUIRES_CHARGING = "requires_charging";
     private static final String KEY_IDLE_REBOOT = "idle_reboot";
     private static final String KEY_CHECK_FOR_UPDATES = "check_for_updates";
+    private static final String KEY_INSTALL_FROM_FILE = "install_from_file";
     static final String KEY_WAITING_FOR_REBOOT = "waiting_for_reboot";
 
     static SharedPreferences getPreferences(final Context context) {
@@ -103,6 +106,18 @@ public class Settings extends CollapsingToolbarBaseActivity {
             implements SharedPreferences.OnSharedPreferenceChangeListener {
         private static String TAG = "SettingsFragment";
 
+        // The read grant goes with the service start, so the copy can outlive this screen.
+        private final ActivityResultLauncher<String[]> pickPackage = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null) {
+                        return;
+                    }
+                    final Context context = requireContext();
+                    context.startForegroundService(new Intent(context, Service.class)
+                            .setData(uri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                });
+
         private void showAlertDialogForMismatchedNetwork(final Context context, final Network network, final int messageId) {
             new AlertDialog.Builder(context)
                 .setTitle(android.R.string.dialog_alert_title)
@@ -160,6 +175,13 @@ public class Settings extends CollapsingToolbarBaseActivity {
                     intent.putExtra(Service.INTENT_EXTRA_IS_USER_INITIATED, true);
                     intent.putExtra(Service.INTENT_EXTRA_NETWORK, network);
                     context.startForegroundService(intent);
+                }
+                return true;
+            });
+
+            requirePreference(KEY_INSTALL_FROM_FILE).setOnPreferenceClickListener(pref -> {
+                if (!getPreferences(requireContext()).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {
+                    pickPackage.launch(new String[] {"application/zip"});
                 }
                 return true;
             });

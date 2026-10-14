@@ -32,6 +32,8 @@ class PackageChecksTests(unittest.TestCase):
     def test_malformed_metadata_is_refused(self): self.scenario('malformed')
     def test_other_device_or_source_is_refused(self): self.scenario('device')
     def test_download_must_match_server_selector(self): self.scenario('server_target')
+    def test_picked_package_must_be_newer_and_keep_data(self): self.scenario('local_target')
+    def test_picked_payload_must_be_whole_and_plain(self): self.scenario('local_payload')
 
     def test_service_parses_packages_only_through_package_checks(self):
         service = (ROOT / 'src/app/seamlessupdate/client/Service.java').read_text()

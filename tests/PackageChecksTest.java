@@ -12,6 +12,8 @@ public final class PackageChecksTest {
             + "post-security-patch-level=2026-10-05\npost-timestamp=1760400000\npre-device=FP6\n";
     private static final String INCREMENTAL = FULL
             + "pre-build=brand/FP6/FP6:17/BP4A.260905.001/2026091000:user/release-keys\npre-build-incremental=2026091000\n";
+    private static final String[] PROPERTIES = {"FILE_HASH=aGFzaA==", "FILE_SIZE=5000", "METADATA_HASH=bWV0YQ==", "METADATA_SIZE=400"};
+    private static final long INSTALLED = 1757500000;
 
     private static void check(boolean v) { if (!v) throw new AssertionError(); }
     private interface Action { void run() throws Exception; }
@@ -22,6 +24,21 @@ public final class PackageChecksTest {
     private static PackageChecks.Metadata metadata(String text) throws Exception {
         return PackageChecks.metadata(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)));
     }
+    private static String[] with(String... extra) {
+        String[] all = java.util.Arrays.copyOf(PROPERTIES, PROPERTIES.length + extra.length);
+        System.arraycopy(extra, 0, all, PROPERTIES.length, extra.length);
+        return all;
+    }
+    private static String[] replacing(String key, String line) {
+        return java.util.Arrays.stream(PROPERTIES).map(p -> p.startsWith(key + "=") ? line : p).toArray(String[]::new);
+    }
+    private static void local(String text, String[] properties, long length) throws Exception {
+        PackageChecks.Metadata m = metadata(text);
+        PackageChecks.requireDevice(m, "FP6", "2026091000", "brand/FP6/FP6:17/BP4A.260905.001/2026091000:user/release-keys");
+        PackageChecks.requireLocalTarget(m, INSTALLED, "2026-09-05");
+        PackageChecks.requireLocalPayload(m, properties, length);
+    }
+
     public static void main(String[] args) throws Exception {
         switch (args[0]) {
             case "parse":
@@ -57,6 +74,31 @@ public final class PackageChecksTest {
                 PackageChecks.requireServerTarget(metadata(FULL), 1760400000, "2026101400");
                 refuses(() -> PackageChecks.requireServerTarget(metadata(FULL), 1760400001, "2026101400"));
                 refuses(() -> PackageChecks.requireServerTarget(metadata(FULL), 1760400000, "2026101401"));
+                break;
+            case "local_target":
+                local(INCREMENTAL, PROPERTIES, 6000);
+                PackageChecks.requireLocalTarget(metadata(FULL), INSTALLED, "2026-10-05");
+                for (long installed : new long[]{0, -1, 1760400000, 1760400001}) {
+                    refuses(() -> PackageChecks.requireLocalTarget(metadata(FULL), installed, "2026-09-05"));
+                }
+                refuses(() -> PackageChecks.requireLocalTarget(metadata(FULL), INSTALLED, "2026-11-05"));
+                for (String text : new String[]{FULL + "ota-downgrade=yes\n", FULL + "spl-downgrade=yes\n", FULL + "ota-wipe=yes\n",
+                        FULL.replace("post-security-patch-level=2026-10-05\n", ""),
+                        FULL.replace("post-security-patch-level=2026-10-05", "post-security-patch-level=October")}) {
+                    refuses(() -> PackageChecks.requireLocalTarget(metadata(text), INSTALLED, "2026-09-05"));
+                }
+                break;
+            case "local_payload":
+                PackageChecks.requireLocalPayload(metadata(FULL), with("POWERWASH=0", "SWITCH_SLOT_ON_REBOOT=1"), 6000);
+                refuses(() -> PackageChecks.requireLocalPayload(metadata(FULL), PROPERTIES, 5999));
+                refuses(() -> PackageChecks.requireLocalPayload(metadata(FULL.replace(":1000:5000,payload_properties", ":1000:0,payload_properties")), PROPERTIES, 6000));
+                for (String[] properties : new String[][]{with("POWERWASH=1"), with("SPL_DOWNGRADE=1"), with("POWERWASH=yes"),
+                        with("FILE_SIZE=5000"), with("garbage"), with("lower_case=1"), with("=1"),
+                        replacing("FILE_SIZE", "FILE_SIZE=4999"), replacing("FILE_HASH", "FILE_HASH="),
+                        replacing("METADATA_HASH", "OTHER=1"), replacing("METADATA_SIZE", "METADATA_SIZE=5000"),
+                        replacing("METADATA_SIZE", "METADATA_SIZE=0"), replacing("METADATA_SIZE", "METADATA_SIZE=x")}) {
+                    refuses(() -> PackageChecks.requireLocalPayload(metadata(FULL), properties, 6000));
+                }
                 break;
             default: throw new IllegalArgumentException();
         }

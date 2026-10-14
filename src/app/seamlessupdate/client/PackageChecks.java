@@ -9,13 +9,15 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
  * Reads the metadata of a package that RecoverySystem.verifyPackage accepted and refuses packages
- * this device must not install.
+ * this device must not install. Downloaded and picked packages share the parsing and device checks.
  */
 final class PackageChecks {
     static final int MAX_TEXT_BYTES = 64 * 1024;
@@ -169,5 +171,68 @@ final class PackageChecks {
         if (!incremental.equals(metadata.incremental)) {
             throw new GeneralSecurityException("incremental does not match server metadata");
         }
+    }
+
+    /**
+     * A picked package has no server to name its build. It must be newer than the installed build,
+     * with a security patch level no older, and keep the user's data.
+     */
+    static void requireLocalTarget(final Metadata metadata, final long buildDate,
+            final String securityPatch) throws GeneralSecurityException {
+        if (metadata.downgrade) {
+            throw new GeneralSecurityException("downgrade package not permitted");
+        }
+        if (metadata.wipe) {
+            throw new GeneralSecurityException("package would erase the user's data");
+        }
+        if (buildDate <= 0 || metadata.timestamp <= buildDate) {
+            throw new GeneralSecurityException("package is not newer than the installed build");
+        }
+        if (metadata.securityPatch == null
+                || !metadata.securityPatch.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")
+                || metadata.securityPatch.compareTo(securityPatch) < 0) {
+            throw new GeneralSecurityException("security patch level missing or older than installed");
+        }
+    }
+
+    /**
+     * update_engine takes the payload location and these headers as given, so a picked package must
+     * carry exactly what it needs and no header that erases data or permits a downgrade.
+     */
+    static void requireLocalPayload(final Metadata metadata, final String[] properties,
+            final long packageLength) throws GeneralSecurityException {
+        if (metadata.payloadSize < 1 || metadata.payloadSize > packageLength - metadata.payloadOffset) {
+            throw new GeneralSecurityException("payload lies outside the package");
+        }
+        final Map<String, String> headers = new HashMap<>();
+        for (final String line : properties) {
+            final int split = line.indexOf('=');
+            if (split < 1 || !line.substring(0, split).matches("[A-Z0-9_]+")
+                    || headers.put(line.substring(0, split), line.substring(split + 1)) != null) {
+                throw new GeneralSecurityException("malformed payload properties");
+            }
+        }
+        if (headers.getOrDefault("FILE_HASH", "").isEmpty()
+                || headers.getOrDefault("METADATA_HASH", "").isEmpty()) {
+            throw new GeneralSecurityException("payload hash missing");
+        }
+        if (!Long.toString(metadata.payloadSize).equals(headers.get("FILE_SIZE"))) {
+            throw new GeneralSecurityException("payload size does not match the package");
+        }
+        final String metadataSize = headers.getOrDefault("METADATA_SIZE", "");
+        if (!metadataSize.matches("[0-9]{1,18}") || Long.parseLong(metadataSize) < 1
+                || Long.parseLong(metadataSize) >= metadata.payloadSize) {
+            throw new GeneralSecurityException("payload metadata size invalid");
+        }
+        if (enabled(headers.get("POWERWASH"))) {
+            throw new GeneralSecurityException("package would erase the user's data");
+        }
+        if (enabled(headers.get("SPL_DOWNGRADE"))) {
+            throw new GeneralSecurityException("downgrade package not permitted");
+        }
+    }
+
+    private static boolean enabled(final String value) {
+        return value != null && !"0".equals(value);
     }
 }

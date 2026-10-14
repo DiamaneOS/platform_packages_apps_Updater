@@ -3,11 +3,14 @@ package app.seamlessupdate.client;
 import static android.os.Build.DEVICE;
 import static android.os.Build.FINGERPRINT;
 import static android.os.Build.VERSION.INCREMENTAL;
+import static android.os.Build.VERSION.SECURITY_PATCH;
 
 import android.app.IntentService;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Network;
+import android.net.Uri;
+import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.RecoverySystem;
@@ -213,6 +216,71 @@ public class Service extends IntentService {
         }
     }
 
+    // A picked package is copied to where downloads go, so verification, parsing and
+    // update_engine read the same bytes, no other app can change them and the card can be removed.
+    private void installFromFile(final Uri uri) throws IOException, GeneralSecurityException {
+        notificationHandler.showCopyNotification(0, 0);
+        ReleaseKeys.require();
+        // The online check must not resume a partial download onto the copy.
+        Settings.getPreferences(this).edit().remove(PREFERENCE_DOWNLOAD_FILE).commit();
+        try {
+            copyToUpdatePath(uri);
+            verify();
+            try (final ZipFile zipFile = new ZipFile(UPDATE_PATH)) {
+                final PackageChecks.Metadata metadata = readPackageMetadata(zipFile);
+                PackageChecks.requireLocalTarget(metadata,
+                        SystemProperties.getLong("ro.build.date.utc", 0), SECURITY_PATCH);
+                final String[] headerKeyValuePairs = readPayloadProperties(zipFile);
+                PackageChecks.requireLocalPayload(metadata, headerKeyValuePairs, UPDATE_PATH.length());
+                install(zipFile, metadata, headerKeyValuePairs, false, false);
+            }
+        } catch (final IOException | GeneralSecurityException | RuntimeException e) {
+            UPDATE_PATH.delete();
+            throw e;
+        }
+    }
+
+    private void copyToUpdatePath(final Uri uri) throws IOException {
+        Files.deleteIfExists(UPDATE_PATH.toPath());
+        final ParcelFileDescriptor file;
+        try {
+            file = getContentResolver().openFileDescriptor(uri, "r");
+        } catch (final SecurityException e) {
+            throw new IOException("no access to the selected file", e);
+        }
+        if (file == null) {
+            throw new IOException("unable to open the selected file");
+        }
+        try (final InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(file);
+                final FileOutputStream output = new FileOutputStream(UPDATE_PATH)) {
+            final long size = file.getStatSize();
+            if (size < 1 || size > DownloadChecks.MAX_PACKAGE_BYTES) {
+                throw new IOException("unexpected update file size: " + size);
+            }
+            try {
+                getSystemService(StorageManager.class).allocateBytes(output.getFD(), size,
+                        StorageManager.FLAG_ALLOCATE_AGGRESSIVE);
+            } catch (final IOException e) {
+                throw new IOException(getString(com.android.internal.R.string.low_memory), e);
+            }
+            notificationHandler.showCopyNotification(0, size);
+            long copied = 0;
+            long last = System.nanoTime();
+            final byte[] buffer = new byte[1024 * 1024];
+            for (int bytesRead; (bytesRead = input.read(buffer)) != -1; ) {
+                if (bytesRead > size - copied) throw new IOException("the selected file changed while it was copied");
+                output.write(buffer, 0, bytesRead);
+                copied += bytesRead;
+                final long now = System.nanoTime();
+                if (now - last > 1000 * 1000 * 1000) {
+                    notificationHandler.showCopyNotification(copied, size);
+                    last = now;
+                }
+            }
+            if (copied != size) throw new IOException("the selected file changed while it was copied");
+        }
+    }
+
     // A server that answers with anything but update information (a web page, say) fails the
     // check like an unreachable one, instead of crashing the service.
     private static String[] readMetadata(final HttpsURLConnection connection) throws IOException {
@@ -237,7 +305,10 @@ public class Service extends IntentService {
         Log.d(TAG, "onHandleIntent");
 
         final Network network = intent.getParcelableExtra(INTENT_EXTRA_NETWORK, Network.class);
-        final var serviceIsUserInitiated = intent.getBooleanExtra(INTENT_EXTRA_IS_USER_INITIATED, false);
+        // Settings puts a package the user picked in the intent data, with a read grant.
+        final Uri pickedFile = intent.getData();
+        final var serviceIsUserInitiated = pickedFile != null
+                || intent.getBooleanExtra(INTENT_EXTRA_IS_USER_INITIATED, false);
         if (serviceIsUserInitiated) Log.d(TAG, "onHandleIntent() – service is user-initiated");
 
         final PowerManager pm = getSystemService(PowerManager.class);
@@ -257,7 +328,13 @@ public class Service extends IntentService {
                 return;
             }
             mUpdating = true;
-            notificationHandler.start();
+            notificationHandler.start(pickedFile != null);
+
+            if (pickedFile != null) {
+                Log.d(TAG, "installing a picked package");
+                installFromFile(pickedFile);
+                return;
+            }
 
             if (network == null) {
                 throw new IOException("Network is unavailable");

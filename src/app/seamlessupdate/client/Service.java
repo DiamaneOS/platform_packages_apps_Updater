@@ -23,11 +23,9 @@ import android.util.Log;
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -154,8 +152,7 @@ public class Service extends IntentService {
         return entry;
     }
 
-    private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
-            final String targetIncremental) throws IOException, GeneralSecurityException {
+    private void verify() throws IOException, GeneralSecurityException {
         try {
             ReleaseKeys.require();
             notificationHandler.showVerifyNotification(0);
@@ -167,88 +164,49 @@ public class Service extends IntentService {
             UPDATE_PATH.delete();
             throw e;
         }
+    }
 
+    private static PackageChecks.Metadata readPackageMetadata(final ZipFile zipFile)
+            throws IOException, GeneralSecurityException {
+        final PackageChecks.Metadata metadata;
+        try (final InputStream input = zipFile.getInputStream(
+                getEntry(zipFile, "META-INF/com/android/metadata"))) {
+            metadata = PackageChecks.metadata(input);
+        }
+        PackageChecks.requireDevice(metadata, DEVICE, INCREMENTAL, FINGERPRINT);
+        return metadata;
+    }
+
+    private static String[] readPayloadProperties(final ZipFile zipFile)
+            throws IOException, GeneralSecurityException {
+        try (final InputStream input = zipFile.getInputStream(
+                getEntry(zipFile, "payload_properties.txt"))) {
+            return PackageChecks.lines(input).toArray(new String[0]);
+        }
+    }
+
+    private void install(final ZipFile zipFile, final PackageChecks.Metadata metadata,
+            final String[] headerKeyValuePairs, final boolean streaming,
+            final boolean incremental) throws IOException {
+        Files.deleteIfExists(CARE_MAP_PATH.toPath());
+        final ZipEntry careMapEntry = zipFile.getEntry("care_map.pb");
+        if (careMapEntry == null) {
+            Log.w(TAG, "care_map.pb missing");
+        } else {
+            Files.copy(zipFile.getInputStream(careMapEntry), CARE_MAP_PATH.toPath());
+            CARE_MAP_PATH.setReadable(true, false);
+        }
+        applyUpdate(streaming, metadata.payloadOffset, headerKeyValuePairs, incremental);
+    }
+
+    private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
+            final String targetIncremental) throws IOException, GeneralSecurityException {
+        verify();
         try (final ZipFile zipFile = new ZipFile(UPDATE_PATH)) {
-            final ZipEntry metadata = getEntry(zipFile, "META-INF/com/android/metadata");
-            long timestamp = 0;
-            String incremental = null;
-            String device = null;
-            String serialno = null;
-            String type = null;
-            String streamingPropertyFiles[] = null;
-            String sourceIncremental = null;
-            String sourceFingerprint = null;
-            try (final var reader = new BufferedReader(new InputStreamReader(zipFile.getInputStream(metadata)))) {
-                for (String line; (line = reader.readLine()) != null; ) {
-                    final String[] pair = line.split("=");
-                    if ("post-timestamp".equals(pair[0])) {
-                        timestamp = Long.parseLong(pair[1]);
-                    } else if ("post-build-incremental".equals(pair[0])) {
-                        incremental = pair[1];
-                    } else if ("pre-device".equals(pair[0])) {
-                        device = pair[1];
-                    } else if ("serialno".equals(pair[0])) {
-                        serialno = pair[1];
-                    } else if ("ota-type".equals(pair[0])) {
-                        type = pair[1];
-                    } else if ("ota-streaming-property-files".equals(pair[0])) {
-                        streamingPropertyFiles = pair[1].trim().split(",");
-                    } else if ("pre-build-incremental".equals(pair[0])) {
-                        sourceIncremental = pair[1];
-                    } else if ("pre-build".equals(pair[0])) {
-                        sourceFingerprint = pair[1];
-                    }
-                }
-            }
-            if (timestamp != targetBuildDate) {
-                throw new GeneralSecurityException("timestamp does not match server metadata");
-            }
-            if (!targetIncremental.equals(incremental)) {
-                throw new GeneralSecurityException("incremental does not match server metadata");
-            }
-            if (!DEVICE.equals(device)) {
-                throw new GeneralSecurityException("device mismatch");
-            }
-            if (serialno != null) {
-                throw new GeneralSecurityException("serialno constraint not permitted");
-            }
-            if (!"AB".equals(type)) {
-                throw new GeneralSecurityException("package is not an A/B update");
-            }
-            if (sourceIncremental != null && !sourceIncremental.equals(INCREMENTAL)) {
-                throw new GeneralSecurityException("source incremental mismatch");
-            }
-            if (sourceFingerprint != null && !sourceFingerprint.equals(FINGERPRINT)) {
-                throw new GeneralSecurityException("source fingerprint mismatch");
-            }
-
-            Long payloadOffset = null;
-            for (final String streamingPropertyFile : streamingPropertyFiles) {
-                final String properties[] = streamingPropertyFile.split(":");
-                if ("payload.bin".equals(properties[0])) {
-                    payloadOffset = Long.parseLong(properties[1]);
-                    break;
-                }
-            }
-            if (payloadOffset == null) {
-                throw new GeneralSecurityException("payload offset missing");
-            }
-
-            Files.deleteIfExists(CARE_MAP_PATH.toPath());
-            final ZipEntry careMapEntry = zipFile.getEntry("care_map.pb");
-            if (careMapEntry == null) {
-                Log.w(TAG, "care_map.pb missing");
-            } else {
-                Files.copy(zipFile.getInputStream(careMapEntry), CARE_MAP_PATH.toPath());
-                CARE_MAP_PATH.setReadable(true, false);
-            }
-
-            final String[] headerKeyValuePairs;
-            final ZipEntry payloadProperties = getEntry(zipFile, "payload_properties.txt");
-            try (final var propertiesReader = new BufferedReader(new InputStreamReader(zipFile.getInputStream(payloadProperties)))) {
-                headerKeyValuePairs = propertiesReader.lines().toArray(String[]::new);
-            }
-            applyUpdate(streaming, payloadOffset, headerKeyValuePairs, sourceIncremental != null);
+            final PackageChecks.Metadata metadata = readPackageMetadata(zipFile);
+            PackageChecks.requireServerTarget(metadata, targetBuildDate, targetIncremental);
+            install(zipFile, metadata, readPayloadProperties(zipFile), streaming,
+                    metadata.sourceIncremental != null);
         } catch (final GeneralSecurityException e) {
             UPDATE_PATH.delete();
             throw e;

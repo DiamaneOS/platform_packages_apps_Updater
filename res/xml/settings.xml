@@ -10,6 +10,11 @@
             app:allowDividerBelow="false"
             app:iconSpaceReserved="false">
 
+        <Preference app:key="download_servers"
+                app:title="@string/download_servers_title"
+                app:summary="@string/download_servers_summary"
+                app:iconSpaceReserved="false" />
+
         <ListPreference app:key="channel"
                 app:title="@string/channel_title"
                 app:iconSpaceReserved="false"

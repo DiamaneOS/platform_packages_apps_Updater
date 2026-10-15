@@ -29,8 +29,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
 import java.util.concurrent.CountDownLatch;
@@ -39,7 +37,8 @@ import java.util.zip.ZipFile;
 
 import javax.net.ssl.HttpsURLConnection;
 
-import libcore.io.IoUtils;
+import de.diamaneos.downloads.DownloadPolicyClient;
+import de.diamaneos.downloads.DownloadTransport;
 
 import org.grapheneos.tls.ModernTLSSocketFactory;
 
@@ -55,13 +54,12 @@ public class Service extends IntentService {
     private static final String PREFERENCE_FAILED_INCREMENTAL = "failed_incremental";
     private static final int HTTP_RANGE_NOT_SATISFIABLE = 416;
     private static final int UPDATE_ENGINE_DOWNLOAD_STATE_INITIALIZATION_ERROR = 20;
-    // Update information is one short line; anything longer is not from an update server.
-    private static final int MAX_METADATA_BYTES = 4096;
 
     private final ModernTLSSocketFactory tlsSocketFactory = new ModernTLSSocketFactory();
 
     private NotificationHandler notificationHandler;
     private boolean mUpdating = false;
+    private DownloadTransport.Route route;
 
     public Service() {
         super(TAG);
@@ -74,16 +72,28 @@ public class Service extends IntentService {
     }
 
     private HttpsURLConnection fetchData(final Network network, final String path) throws IOException {
-        final URL url = new URL(getString(R.string.url) + path);
-        final HttpsURLConnection urlConnection = (HttpsURLConnection) network.openConnection(url);
-        urlConnection.setSSLSocketFactory(tlsSocketFactory);
-        urlConnection.setConnectTimeout(CONNECT_TIMEOUT);
-        urlConnection.setReadTimeout(READ_TIMEOUT);
-        return urlConnection;
+        return fetchData(network, path, 0);
+    }
+
+    private HttpsURLConnection fetchData(final Network network, final String path,
+            final long offset) throws IOException {
+        return DownloadTransport.open(route, path, offset, connector(network), this::configure);
+    }
+
+    private static DownloadTransport.Connector connector(final Network network) {
+        return url -> (HttpsURLConnection) network.openConnection(url);
+    }
+
+    private void configure(final HttpsURLConnection connection) {
+        connection.setSSLSocketFactory(tlsSocketFactory);
+        connection.setConnectTimeout(CONNECT_TIMEOUT);
+        connection.setReadTimeout(READ_TIMEOUT);
+        connection.setRequestProperty("Accept-Encoding", "identity");
     }
 
     private void applyUpdate(final boolean streaming, final long payloadOffset,
             final String[] headerKeyValuePairs, final boolean incremental) throws IOException {
+        if (streaming) throw new IOException("Remote streaming is unsupported by the bounded transport");
         notificationHandler.showInstallNotification(0);
 
         final CountDownLatch monitor = new CountDownLatch(1);
@@ -122,14 +132,8 @@ public class Service extends IntentService {
             }
         };
         engine.bind(callback);
-        if (streaming) {
-            final SharedPreferences preferences = Settings.getPreferences(this);
-            final String downloadFile = preferences.getString(PREFERENCE_DOWNLOAD_FILE, null);
-            engine.applyPayload(getString(R.string.url) + downloadFile.replace("-streaming", ""), payloadOffset, 0, headerKeyValuePairs);
-        } else {
-            UPDATE_PATH.setReadable(true, false);
-            engine.applyPayload("file://" + UPDATE_PATH, payloadOffset, 0, headerKeyValuePairs);
-        }
+        UPDATE_PATH.setReadable(true, false);
+        engine.applyPayload("file://" + UPDATE_PATH, payloadOffset, 0, headerKeyValuePairs);
         try {
             monitor.await();
         } catch (InterruptedException e) {}
@@ -255,19 +259,9 @@ public class Service extends IntentService {
     // A server that answers with anything but update information (a web page, say) fails the
     // check like an unreachable one, instead of crashing the service.
     private static String[] readMetadata(final HttpsURLConnection connection) throws IOException {
-        final byte[] body;
         try (final InputStream input = connection.getInputStream()) {
-            body = input.readNBytes(MAX_METADATA_BYTES + 1);
+            return DownloadChecks.metadata(input);
         }
-        if (body.length > MAX_METADATA_BYTES) {
-            throw new IOException("update information is larger than " + MAX_METADATA_BYTES + " bytes");
-        }
-        final String line = new String(body, StandardCharsets.UTF_8).split("\n", 2)[0].trim();
-        final String[] metadata = line.split(" ");
-        if (metadata.length < 4 || !metadata[1].matches("[0-9]{1,18}")) {
-            throw new IOException("malformed update information from the update server");
-        }
-        return metadata;
     }
 
     private void annoyUser() {
@@ -291,7 +285,6 @@ public class Service extends IntentService {
         final PowerManager pm = getSystemService(PowerManager.class);
         final WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Updater:" + TAG);
         HttpsURLConnection connection = null;
-        InputStream input = null;
         try {
             wakeLock.acquire();
 
@@ -312,27 +305,22 @@ public class Service extends IntentService {
             }
 
             final String channel = SystemProperties.get("sys.update.channel", Settings.getChannel(this));
+            // Automatic probes the channel metadata on both servers and starts on the faster.
+            route = DownloadTransport.route(DownloadPolicyClient.read(this), false,
+                    DEVICE + "-" + channel, connector(network), this::configure);
 
-            Log.d(TAG, "fetching metadata for " + DEVICE + "-" + channel);
+            Log.d(TAG, "fetching metadata for " + DEVICE + "-" + channel + " from " + route.server());
             connection = fetchData(network, DEVICE + "-" + channel);
             final String[] metadata = readMetadata(connection);
 
             final String targetIncremental = metadata[0];
             final long targetBuildDate = Long.parseLong(metadata[1]);
             final long sourceBuildDate = SystemProperties.getLong("ro.build.date.utc", 0);
-            if (targetBuildDate <= sourceBuildDate) {
+            if (!DownloadChecks.newer(metadata, DEVICE, channel, INCREMENTAL, sourceBuildDate)) {
                 notificationHandler.showUpdatedNotification(channel);
                 Log.d(TAG, "targetBuildDate: " + targetBuildDate + " not higher than sourceBuildDate: " + sourceBuildDate);
                 mUpdating = false;
                 return;
-            }
-            final String targetDevice = metadata[2];
-            if (!targetDevice.equals(DEVICE)) {
-                throw new GeneralSecurityException("targetDevice: " + targetDevice + " does not match device: " + DEVICE);
-            }
-            final String targetChannel = metadata[3];
-            if (!targetChannel.equals(channel)) {
-                throw new GeneralSecurityException("targetChannel: " + targetChannel + " does not match channel: " + channel);
             }
 
             // Never download an update this build could not tell from a forged one.
@@ -344,7 +332,8 @@ public class Service extends IntentService {
             long downloaded;
             long contentLength;
 
-            final boolean streaming = SystemProperties.getBoolean("sys.update.streaming_test", false);
+            // Keep every network read in the allowlisted transport. update_engine uses verified local bytes.
+            final boolean streaming = false;
 
             final String streamingPrefix = streaming ? "-streaming" : "";
             final String incrementalUpdate = DEVICE + streamingPrefix + "-incremental-" + INCREMENTAL + "-" + targetIncremental + ".zip";
@@ -358,8 +347,7 @@ public class Service extends IntentService {
 
             if (downloaded > 0) {
                 Log.d(TAG, "resume fetch of " + downloadFile + " from " + downloaded + " bytes");
-                connection = fetchData(network, downloadFile);
-                connection.setRequestProperty("Range", "bytes=" + downloaded + "-");
+                connection = fetchData(network, downloadFile, downloaded);
                 final int responseCode = connection.getResponseCode();
                 if (responseCode == HTTP_RANGE_NOT_SATISFIABLE) {
                     Log.d(TAG, "download completed previously");
@@ -379,8 +367,8 @@ public class Service extends IntentService {
                     downloadFile = fullUpdate;
                     connection = fetchData(network, downloadFile);
                 }
-                contentLength = connection.getContentLengthLong() + downloaded;
-                input = connection.getInputStream();
+                contentLength = DownloadChecks.length(connection.getResponseCode(), downloaded,
+                        connection.getContentLengthLong(), connection.getHeaderField("Content-Range"));
             } else {
                 Files.deleteIfExists(UPDATE_PATH.toPath());
 
@@ -404,8 +392,8 @@ public class Service extends IntentService {
                         connection = fetchData(network, downloadFile);
                     }
                 }
-                contentLength = connection.getContentLengthLong();
-                input = connection.getInputStream();
+                contentLength = DownloadChecks.length(connection.getResponseCode(), 0,
+                        connection.getContentLengthLong(), null);
             }
 
             notificationHandler.showDownloadNotification(downloaded, contentLength);
@@ -421,25 +409,34 @@ public class Service extends IntentService {
                 Log.d(TAG, "unable to allocate " + requiredBytes + " bytes, proceeding anyway", e);
             }
 
-            try (final OutputStream output = new FileOutputStream(UPDATE_PATH, downloaded != 0)) {
+            final long start = downloaded;
+            try (final OutputStream output = new FileOutputStream(UPDATE_PATH, start != 0)) {
                 preferences.edit().putString(PREFERENCE_DOWNLOAD_FILE, downloadFile).commit();
 
-                int bytesRead;
-                long last = System.nanoTime();
-                final byte[] buffer = new byte[16384];
-                while ((bytesRead = input.read(buffer)) != -1) {
-                    output.write(buffer, 0, bytesRead);
-                    downloaded += bytesRead;
-                    final long now = System.nanoTime();
-                    if (now - last > 1000 * 1000 * 1000) {
-                        Log.d(TAG, "downloaded " + downloaded + " from " + contentLength + " bytes");
-                        notificationHandler.showDownloadNotification(downloaded, contentLength);
-                        last = now;
+                final long total = contentLength;
+                final DownloadTransport.Sink sink = new DownloadTransport.Sink() {
+                    long received = start;
+                    long last = System.nanoTime();
+
+                    @Override
+                    public void write(final byte[] buffer, final int count) throws IOException {
+                        output.write(buffer, 0, count);
+                        received += count;
+                        final long now = System.nanoTime();
+                        if (now - last > 1000 * 1000 * 1000) {
+                            Log.d(TAG, "downloaded " + received + " from " + total + " bytes");
+                            notificationHandler.showDownloadNotification(received, total);
+                            last = now;
+                        }
                     }
-                }
+                };
+                // A failure or stall mid-way continues on the other server from the same offset.
+                downloaded = DownloadTransport.copy(route, downloadFile, connection, start, total,
+                        sink, connector(network), this::configure);
             }
 
-            Log.d(TAG, "download completed");
+            if (downloaded != contentLength) throw new IOException("Update download is incomplete");
+            Log.d(TAG, "download completed from " + route.server());
             onDownloadFinished(streaming, targetBuildDate, targetIncremental);
         } catch (ReleaseKeys.UntrustedBuildException e) {
             Log.w(TAG, "not downloading or installing updates: " + e.getMessage());
@@ -460,8 +457,6 @@ public class Service extends IntentService {
                 Log.w(TAG, "onHandleIntent() – service failed but has been scheduled for retry");
             }
         } finally {
-            IoUtils.closeQuietly(input);
-
             if (connection != null) {
                 connection.disconnect();
             }

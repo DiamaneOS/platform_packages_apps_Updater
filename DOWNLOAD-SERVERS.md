@@ -1,11 +1,13 @@
 # Download servers
 
-Updater reads the shared Settings.Global policy and links to Network & internet. Europe is the default; Canada and fallback are optional. Only the fixed release origins are used.
+Updater reads the shared Settings.Global policy and links to Network & internet. Automatic is the default. Europe only and Canada only use one server. Only the fixed release origins are used.
 
-Missing or unknown policy selects Europe with fallback off. Authority read failures stop the request before contacting a server.
+A missing or unknown policy selects Automatic. If the policy cannot be read, no server is contacted.
 
-TLS pins cover both origins. Redirects and TLS failures are refused. One alternate attempt can precede body consumption after a connection or temporary server failure. Parsing and verification failures do not trigger fallback.
+Automatic sends HEAD for the channel metadata to both servers and starts on the faster. A connection or temporary server failure before the body moves to the other server. A package download that fails or stalls mid-way continues there from the same offset, with the exact `Content-Range` of a package of the same size.
 
-Selectors are bounded, untrusted hints. Older timestamps and inconsistent identity fail. Native signed OTA verification authorizes installation; HTTP streaming is disabled. Resumed downloads require exact ranges and bounded length. Settings' `DiamaneOSDownloadPolicyClient` supplies the public-SDK policy reader.
+TLS pins cover both origins. TLS failures and redirects are refused and never move to the other server. Parsing and verification failures do not either.
+
+Selectors are bounded, untrusted hints. Older timestamps and inconsistent identity fail. Native signed OTA verification of the whole package authorizes installation. HTTP streaming is disabled. Resumed downloads require exact ranges and bounded length. Settings' `DiamaneOSDownloadPolicyClient` supplies the public-SDK policy reader.
 
 Run `python3 -m unittest discover -s tests -p 'test_download_checks.py'` with a host JDK. These fixtures exercise selector and range handling, not Android installation, native OTA signatures or network service behavior.

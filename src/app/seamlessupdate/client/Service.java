@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Network;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
@@ -22,6 +24,7 @@ import android.os.UpdateEngine.UpdateStatusConstants;
 import android.os.UpdateEngineCallback;
 import android.os.storage.StorageManager;
 import android.util.Log;
+import android.widget.Toast;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
@@ -289,6 +292,14 @@ public class Service extends IntentService {
         }
     }
 
+    // Both early returns follow an installed update that waits for the restart.
+    private void explainSkippedPick(final Uri pickedFile) {
+        if (pickedFile != null) {
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
+                    R.string.notification_reboot_text, Toast.LENGTH_LONG).show());
+        }
+    }
+
     private void annoyUser() {
         PeriodicJob.cancel(this);
         PeriodicJob.resetRetryDelay(this);
@@ -320,14 +331,17 @@ public class Service extends IntentService {
 
             if (mUpdating) {
                 Log.d(TAG, "updating already, returning early");
+                explainSkippedPick(pickedFile);
                 return;
             }
             final SharedPreferences preferences = Settings.getPreferences(this);
             if (preferences.getBoolean(Settings.KEY_WAITING_FOR_REBOOT, false)) {
                 Log.d(TAG, "updated already, waiting for reboot");
+                explainSkippedPick(pickedFile);
                 return;
             }
             mUpdating = true;
+            InstallStatus.started();
             notificationHandler.start(pickedFile != null);
 
             if (pickedFile != null) {
@@ -497,6 +511,7 @@ public class Service extends IntentService {
                 connection.disconnect();
             }
             notificationHandler.cancelProgressNotification();
+            InstallStatus.finished(pickedFile != null);
             Log.d(TAG, "release wake lock");
             wakeLock.release();
         }

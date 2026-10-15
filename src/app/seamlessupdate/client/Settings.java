@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.UserManager;
 import android.util.Log;
 import android.view.MenuItem;
+import android.widget.Toast;
 import android.app.job.JobInfo;
 import android.app.AlertDialog;
 
@@ -24,6 +25,8 @@ import androidx.preference.TwoStatePreference;
 
 import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 import com.android.settingslib.preference.PreferenceFragment;
+
+import java.text.NumberFormat;
 
 import static java.util.Objects.requireNonNull;
 
@@ -112,6 +115,10 @@ public class Settings extends CollapsingToolbarBaseActivity {
                     if (uri == null) {
                         return;
                     }
+                    if (!InstallStatus.claim(com.android.internal.R.string.reboot_to_update_package)) {
+                        toast(R.string.install_from_file_busy);
+                        return;
+                    }
                     final Context context = requireContext();
                     context.startForegroundService(new Intent(context, Service.class)
                             .setData(uri)
@@ -180,7 +187,11 @@ public class Settings extends CollapsingToolbarBaseActivity {
             });
 
             requirePreference(KEY_INSTALL_FROM_FILE).setOnPreferenceClickListener(pref -> {
-                if (!getPreferences(requireContext()).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {
+                if (getPreferences(requireContext()).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {
+                    toast(R.string.notification_reboot_text);
+                } else if (InstallStatus.busy()) {
+                    toast(R.string.install_from_file_busy);
+                } else {
                     pickPackage.launch(new String[] {"application/zip"});
                 }
                 return true;
@@ -248,12 +259,34 @@ public class Settings extends CollapsingToolbarBaseActivity {
             // User can open updater settings and then open security preview settings from the
             // notification.
             updateAndReturnSecurityPreviewPreference();
+            InstallStatus.setListener(this::showInstallStatus);
+            showInstallStatus();
         }
 
         @Override
         public void onPause() {
             super.onPause();
             getPreferenceManager().getSharedPreferences().unregisterOnSharedPreferenceChangeListener(this);
+            InstallStatus.setListener(null);
+        }
+
+        private void toast(final int resId) {
+            Toast.makeText(requireContext(), resId, Toast.LENGTH_LONG).show();
+        }
+
+        // The step of an install from storage, as in its notification, or how it ended.
+        private void showInstallStatus() {
+            final Preference pref = requirePreference(KEY_INSTALL_FROM_FILE);
+            final int titleResId = InstallStatus.titleResId();
+            final int percent = InstallStatus.percent();
+            if (titleResId == 0) {
+                pref.setSummary(R.string.install_from_file_summary);
+            } else if (percent < 0) {
+                pref.setSummary(titleResId);
+            } else {
+                pref.setSummary(getString(R.string.install_from_file_progress, getString(titleResId),
+                        NumberFormat.getPercentInstance().format(percent / 100.0)));
+            }
         }
 
         private <T extends Preference> T requirePreference(String key) {

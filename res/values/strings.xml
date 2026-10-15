@@ -55,6 +55,8 @@
     <string name="check_for_updates_summary_untrusted_build">Tap to check for updates. This build is signed with public test keys, so updates won\'t be downloaded or installed</string>
     <string name="install_from_file_title">Install from storage</string>
     <string name="install_from_file_summary">Pick an update file on a microSD card or USB drive</string>
+    <string name="install_from_file_progress">%1$s · %2$s</string>
+    <string name="install_from_file_busy">An update is already being installed</string>
     <string name="notification_settings_title">Notification settings</string>
     <string name="notification_settings_summary">Modify notification channel settings</string>
     <string name="use_security_preview_channel_title">Receive security preview releases</string>

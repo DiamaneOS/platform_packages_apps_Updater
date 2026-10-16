@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.UserManager;
 import android.util.Log;
 import android.view.MenuItem;
+import android.view.View;
 import android.widget.Toast;
 import android.app.job.JobInfo;
 import android.app.AlertDialog;
@@ -22,6 +23,8 @@ import androidx.preference.PreferenceManager;
 import androidx.preference.Preference;
 import androidx.preference.ListPreference;
 import androidx.preference.TwoStatePreference;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.SimpleItemAnimator;
 
 import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 import com.android.settingslib.preference.PreferenceFragment;
@@ -137,6 +140,17 @@ public class Settings extends CollapsingToolbarBaseActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> {})
                 .show();
+        }
+
+        @Override
+        public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+            super.onViewCreated(view, savedInstanceState);
+            // The install from storage summary changes with every percent. A change animation for
+            // each one would also flash the list's scrollbar.
+            final RecyclerView.ItemAnimator animator = getListView().getItemAnimator();
+            if (animator instanceof SimpleItemAnimator) {
+                ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);
+            }
         }
 
         @Override

@@ -145,8 +145,9 @@ public class Settings extends CollapsingToolbarBaseActivity {
         @Override
         public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
             super.onViewCreated(view, savedInstanceState);
-            // The install from storage summary changes with every percent. A change animation for
-            // each one would also flash the list's scrollbar.
+            // The install from storage summary changes with every percent, and every change wakes
+            // the list's scrollbar. The list is short, so it has none, and no change animation.
+            getListView().setVerticalScrollBarEnabled(false);
             final RecyclerView.ItemAnimator animator = getListView().getItemAnimator();
             if (animator instanceof SimpleItemAnimator) {
                 ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);

@@ -5,6 +5,11 @@
             app:summary="@string/check_for_updates_summary"
             app:iconSpaceReserved="false" />
 
+    <Preference app:key="install_from_file"
+            app:title="@string/install_from_file_title"
+            app:summary="@string/install_from_file_summary"
+            app:iconSpaceReserved="false" />
+
     <PreferenceCategory app:title="@string/settings_header"
             app:allowDividerAbove="false"
             app:allowDividerBelow="false"

@@ -10,18 +10,26 @@ import android.os.Bundle;
 import android.os.UserManager;
 import android.util.Log;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.Toast;
 import android.app.job.JobInfo;
 import android.app.AlertDialog;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 import androidx.preference.Preference;
 import androidx.preference.ListPreference;
 import androidx.preference.TwoStatePreference;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.SimpleItemAnimator;
 
 import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 import com.android.settingslib.preference.PreferenceFragment;
+
+import java.text.NumberFormat;
 
 import static java.util.Objects.requireNonNull;
 
@@ -33,6 +41,7 @@ public class Settings extends CollapsingToolbarBaseActivity {
     private static final String KEY_REQUIRES_CHARGING = "requires_charging";
     private static final String KEY_IDLE_REBOOT = "idle_reboot";
     private static final String KEY_CHECK_FOR_UPDATES = "check_for_updates";
+    private static final String KEY_INSTALL_FROM_FILE = "install_from_file";
     static final String KEY_WAITING_FOR_REBOOT = "waiting_for_reboot";
 
     static SharedPreferences getPreferences(final Context context) {
@@ -103,6 +112,22 @@ public class Settings extends CollapsingToolbarBaseActivity {
             implements SharedPreferences.OnSharedPreferenceChangeListener {
         private static String TAG = "SettingsFragment";
 
+        // The read grant goes with the service start, so the copy can outlive this screen.
+        private final ActivityResultLauncher<String[]> pickPackage = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null) {
+                        return;
+                    }
+                    if (!InstallStatus.claim(com.android.internal.R.string.reboot_to_update_package)) {
+                        toast(R.string.install_from_file_busy);
+                        return;
+                    }
+                    final Context context = requireContext();
+                    context.startForegroundService(new Intent(context, Service.class)
+                            .setData(uri)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                });
+
         private void showAlertDialogForMismatchedNetwork(final Context context, final Network network, final int messageId) {
             new AlertDialog.Builder(context)
                 .setTitle(android.R.string.dialog_alert_title)
@@ -115,6 +140,18 @@ public class Settings extends CollapsingToolbarBaseActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> {})
                 .show();
+        }
+
+        @Override
+        public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
+            super.onViewCreated(view, savedInstanceState);
+            // The install from storage summary changes with every percent, and every change wakes
+            // the list's scrollbar. The list is short, so it has none, and no change animation.
+            getListView().setVerticalScrollBarEnabled(false);
+            final RecyclerView.ItemAnimator animator = getListView().getItemAnimator();
+            if (animator instanceof SimpleItemAnimator) {
+                ((SimpleItemAnimator) animator).setSupportsChangeAnimations(false);
+            }
         }
 
         @Override
@@ -160,6 +197,17 @@ public class Settings extends CollapsingToolbarBaseActivity {
                     intent.putExtra(Service.INTENT_EXTRA_IS_USER_INITIATED, true);
                     intent.putExtra(Service.INTENT_EXTRA_NETWORK, network);
                     context.startForegroundService(intent);
+                }
+                return true;
+            });
+
+            requirePreference(KEY_INSTALL_FROM_FILE).setOnPreferenceClickListener(pref -> {
+                if (getPreferences(requireContext()).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {
+                    toast(R.string.notification_reboot_text);
+                } else if (InstallStatus.busy()) {
+                    toast(R.string.install_from_file_busy);
+                } else {
+                    pickPackage.launch(new String[] {"application/zip"});
                 }
                 return true;
             });
@@ -226,12 +274,34 @@ public class Settings extends CollapsingToolbarBaseActivity {
             // User can open updater settings and then open security preview settings from the
             // notification.
             updateAndReturnSecurityPreviewPreference();
+            InstallStatus.setListener(this::showInstallStatus);
+            showInstallStatus();
         }
 
         @Override
         public void onPause() {
             super.onPause();
             getPreferenceManager().getSharedPreferences().unregisterOnSharedPreferenceChangeListener(this);
+            InstallStatus.setListener(null);
+        }
+
+        private void toast(final int resId) {
+            Toast.makeText(requireContext(), resId, Toast.LENGTH_LONG).show();
+        }
+
+        // The step of an install from storage, as in its notification, or how it ended.
+        private void showInstallStatus() {
+            final Preference pref = requirePreference(KEY_INSTALL_FROM_FILE);
+            final int titleResId = InstallStatus.titleResId();
+            final int percent = InstallStatus.percent();
+            if (titleResId == 0) {
+                pref.setSummary(R.string.install_from_file_summary);
+            } else if (percent < 0) {
+                pref.setSummary(titleResId);
+            } else {
+                pref.setSummary(getString(R.string.install_from_file_progress, getString(titleResId),
+                        NumberFormat.getPercentInstance().format(percent / 100.0)));
+            }
         }
 
         private <T extends Preference> T requirePreference(String key) {

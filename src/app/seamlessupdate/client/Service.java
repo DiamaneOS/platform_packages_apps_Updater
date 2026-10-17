@@ -3,11 +3,16 @@ package app.seamlessupdate.client;
 import static android.os.Build.DEVICE;
 import static android.os.Build.FINGERPRINT;
 import static android.os.Build.VERSION.INCREMENTAL;
+import static android.os.Build.VERSION.SECURITY_PATCH;
 
 import android.app.IntentService;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Network;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.RecoverySystem;
@@ -19,15 +24,14 @@ import android.os.UpdateEngine.UpdateStatusConstants;
 import android.os.UpdateEngineCallback;
 import android.os.storage.StorageManager;
 import android.util.Log;
+import android.widget.Toast;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -156,8 +160,7 @@ public class Service extends IntentService {
         return entry;
     }
 
-    private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
-            final String targetIncremental) throws IOException, GeneralSecurityException {
+    private void verify() throws IOException, GeneralSecurityException {
         try {
             ReleaseKeys.require();
             notificationHandler.showVerifyNotification(0);
@@ -169,91 +172,117 @@ public class Service extends IntentService {
             UPDATE_PATH.delete();
             throw e;
         }
+    }
 
+    private static PackageChecks.Metadata readPackageMetadata(final ZipFile zipFile)
+            throws IOException, GeneralSecurityException {
+        final PackageChecks.Metadata metadata;
+        try (final InputStream input = zipFile.getInputStream(
+                getEntry(zipFile, "META-INF/com/android/metadata"))) {
+            metadata = PackageChecks.metadata(input);
+        }
+        PackageChecks.requireDevice(metadata, DEVICE, INCREMENTAL, FINGERPRINT);
+        return metadata;
+    }
+
+    private static String[] readPayloadProperties(final ZipFile zipFile)
+            throws IOException, GeneralSecurityException {
+        try (final InputStream input = zipFile.getInputStream(
+                getEntry(zipFile, "payload_properties.txt"))) {
+            return PackageChecks.lines(input).toArray(new String[0]);
+        }
+    }
+
+    private void install(final ZipFile zipFile, final PackageChecks.Metadata metadata,
+            final String[] headerKeyValuePairs, final boolean streaming,
+            final boolean incremental) throws IOException {
+        Files.deleteIfExists(CARE_MAP_PATH.toPath());
+        final ZipEntry careMapEntry = zipFile.getEntry("care_map.pb");
+        if (careMapEntry == null) {
+            Log.w(TAG, "care_map.pb missing");
+        } else {
+            Files.copy(zipFile.getInputStream(careMapEntry), CARE_MAP_PATH.toPath());
+            CARE_MAP_PATH.setReadable(true, false);
+        }
+        applyUpdate(streaming, metadata.payloadOffset, headerKeyValuePairs, incremental);
+    }
+
+    private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
+            final String targetIncremental) throws IOException, GeneralSecurityException {
+        verify();
         try (final ZipFile zipFile = new ZipFile(UPDATE_PATH)) {
-            final ZipEntry metadata = getEntry(zipFile, "META-INF/com/android/metadata");
-            long timestamp = 0;
-            String incremental = null;
-            String device = null;
-            String serialno = null;
-            String type = null;
-            String streamingPropertyFiles[] = null;
-            String sourceIncremental = null;
-            String sourceFingerprint = null;
-            try (final var reader = new BufferedReader(new InputStreamReader(zipFile.getInputStream(metadata)))) {
-                for (String line; (line = reader.readLine()) != null; ) {
-                    final String[] pair = line.split("=");
-                    if ("post-timestamp".equals(pair[0])) {
-                        timestamp = Long.parseLong(pair[1]);
-                    } else if ("post-build-incremental".equals(pair[0])) {
-                        incremental = pair[1];
-                    } else if ("pre-device".equals(pair[0])) {
-                        device = pair[1];
-                    } else if ("serialno".equals(pair[0])) {
-                        serialno = pair[1];
-                    } else if ("ota-type".equals(pair[0])) {
-                        type = pair[1];
-                    } else if ("ota-streaming-property-files".equals(pair[0])) {
-                        streamingPropertyFiles = pair[1].trim().split(",");
-                    } else if ("pre-build-incremental".equals(pair[0])) {
-                        sourceIncremental = pair[1];
-                    } else if ("pre-build".equals(pair[0])) {
-                        sourceFingerprint = pair[1];
-                    }
-                }
-            }
-            if (timestamp != targetBuildDate) {
-                throw new GeneralSecurityException("timestamp does not match server metadata");
-            }
-            if (!targetIncremental.equals(incremental)) {
-                throw new GeneralSecurityException("incremental does not match server metadata");
-            }
-            if (!DEVICE.equals(device)) {
-                throw new GeneralSecurityException("device mismatch");
-            }
-            if (serialno != null) {
-                throw new GeneralSecurityException("serialno constraint not permitted");
-            }
-            if (!"AB".equals(type)) {
-                throw new GeneralSecurityException("package is not an A/B update");
-            }
-            if (sourceIncremental != null && !sourceIncremental.equals(INCREMENTAL)) {
-                throw new GeneralSecurityException("source incremental mismatch");
-            }
-            if (sourceFingerprint != null && !sourceFingerprint.equals(FINGERPRINT)) {
-                throw new GeneralSecurityException("source fingerprint mismatch");
-            }
-
-            Long payloadOffset = null;
-            for (final String streamingPropertyFile : streamingPropertyFiles) {
-                final String properties[] = streamingPropertyFile.split(":");
-                if ("payload.bin".equals(properties[0])) {
-                    payloadOffset = Long.parseLong(properties[1]);
-                    break;
-                }
-            }
-            if (payloadOffset == null) {
-                throw new GeneralSecurityException("payload offset missing");
-            }
-
-            Files.deleteIfExists(CARE_MAP_PATH.toPath());
-            final ZipEntry careMapEntry = zipFile.getEntry("care_map.pb");
-            if (careMapEntry == null) {
-                Log.w(TAG, "care_map.pb missing");
-            } else {
-                Files.copy(zipFile.getInputStream(careMapEntry), CARE_MAP_PATH.toPath());
-                CARE_MAP_PATH.setReadable(true, false);
-            }
-
-            final String[] headerKeyValuePairs;
-            final ZipEntry payloadProperties = getEntry(zipFile, "payload_properties.txt");
-            try (final var propertiesReader = new BufferedReader(new InputStreamReader(zipFile.getInputStream(payloadProperties)))) {
-                headerKeyValuePairs = propertiesReader.lines().toArray(String[]::new);
-            }
-            applyUpdate(streaming, payloadOffset, headerKeyValuePairs, sourceIncremental != null);
+            final PackageChecks.Metadata metadata = readPackageMetadata(zipFile);
+            PackageChecks.requireServerTarget(metadata, targetBuildDate, targetIncremental);
+            install(zipFile, metadata, readPayloadProperties(zipFile), streaming,
+                    metadata.sourceIncremental != null);
         } catch (final GeneralSecurityException e) {
             UPDATE_PATH.delete();
             throw e;
+        }
+    }
+
+    // A picked package is copied to where downloads go, so verification, parsing and
+    // update_engine read the same bytes, no other app can change them and the card can be removed.
+    private void installFromFile(final Uri uri) throws IOException, GeneralSecurityException {
+        notificationHandler.showCopyNotification(0, 0);
+        ReleaseKeys.require();
+        // The online check must not resume a partial download onto the copy.
+        Settings.getPreferences(this).edit().remove(PREFERENCE_DOWNLOAD_FILE).commit();
+        try {
+            copyToUpdatePath(uri);
+            verify();
+            try (final ZipFile zipFile = new ZipFile(UPDATE_PATH)) {
+                final PackageChecks.Metadata metadata = readPackageMetadata(zipFile);
+                PackageChecks.requireLocalTarget(metadata,
+                        SystemProperties.getLong("ro.build.date.utc", 0), SECURITY_PATCH);
+                final String[] headerKeyValuePairs = readPayloadProperties(zipFile);
+                PackageChecks.requireLocalPayload(metadata, headerKeyValuePairs, UPDATE_PATH.length());
+                install(zipFile, metadata, headerKeyValuePairs, false, false);
+            }
+        } catch (final IOException | GeneralSecurityException | RuntimeException e) {
+            UPDATE_PATH.delete();
+            throw e;
+        }
+    }
+
+    private void copyToUpdatePath(final Uri uri) throws IOException {
+        Files.deleteIfExists(UPDATE_PATH.toPath());
+        final ParcelFileDescriptor file;
+        try {
+            file = getContentResolver().openFileDescriptor(uri, "r");
+        } catch (final SecurityException e) {
+            throw new IOException("no access to the selected file", e);
+        }
+        if (file == null) {
+            throw new IOException("unable to open the selected file");
+        }
+        try (final InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(file);
+                final FileOutputStream output = new FileOutputStream(UPDATE_PATH)) {
+            final long size = file.getStatSize();
+            if (size < 1 || size > DownloadChecks.MAX_PACKAGE_BYTES) {
+                throw new IOException("unexpected update file size: " + size);
+            }
+            try {
+                getSystemService(StorageManager.class).allocateBytes(output.getFD(), size,
+                        StorageManager.FLAG_ALLOCATE_AGGRESSIVE);
+            } catch (final IOException e) {
+                throw new IOException(getString(com.android.internal.R.string.low_memory), e);
+            }
+            notificationHandler.showCopyNotification(0, size);
+            long copied = 0;
+            long last = System.nanoTime();
+            final byte[] buffer = new byte[1024 * 1024];
+            for (int bytesRead; (bytesRead = input.read(buffer)) != -1; ) {
+                if (bytesRead > size - copied) throw new IOException("the selected file changed while it was copied");
+                output.write(buffer, 0, bytesRead);
+                copied += bytesRead;
+                final long now = System.nanoTime();
+                if (now - last > 1000 * 1000 * 1000) {
+                    notificationHandler.showCopyNotification(copied, size);
+                    last = now;
+                }
+            }
+            if (copied != size) throw new IOException("the selected file changed while it was copied");
         }
     }
 
@@ -262,6 +291,14 @@ public class Service extends IntentService {
     private static String[] readMetadata(final HttpsURLConnection connection) throws IOException {
         try (final InputStream input = connection.getInputStream()) {
             return DownloadChecks.metadata(input);
+        }
+    }
+
+    // Both early returns follow an installed update that waits for the restart.
+    private void explainSkippedPick(final Uri pickedFile) {
+        if (pickedFile != null) {
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
+                    R.string.notification_reboot_text, Toast.LENGTH_LONG).show());
         }
     }
 
@@ -281,7 +318,10 @@ public class Service extends IntentService {
         Log.d(TAG, "onHandleIntent");
 
         final Network network = intent.getParcelableExtra(INTENT_EXTRA_NETWORK, Network.class);
-        final var serviceIsUserInitiated = intent.getBooleanExtra(INTENT_EXTRA_IS_USER_INITIATED, false);
+        // Settings puts a package the user picked in the intent data, with a read grant.
+        final Uri pickedFile = intent.getData();
+        final var serviceIsUserInitiated = pickedFile != null
+                || intent.getBooleanExtra(INTENT_EXTRA_IS_USER_INITIATED, false);
         if (serviceIsUserInitiated) Log.d(TAG, "onHandleIntent() – service is user-initiated");
 
         final PowerManager pm = getSystemService(PowerManager.class);
@@ -292,15 +332,24 @@ public class Service extends IntentService {
 
             if (mUpdating) {
                 Log.d(TAG, "updating already, returning early");
+                explainSkippedPick(pickedFile);
                 return;
             }
             final SharedPreferences preferences = Settings.getPreferences(this);
             if (preferences.getBoolean(Settings.KEY_WAITING_FOR_REBOOT, false)) {
                 Log.d(TAG, "updated already, waiting for reboot");
+                explainSkippedPick(pickedFile);
                 return;
             }
             mUpdating = true;
-            notificationHandler.start();
+            InstallStatus.started();
+            notificationHandler.start(pickedFile != null);
+
+            if (pickedFile != null) {
+                Log.d(TAG, "installing a picked package");
+                installFromFile(pickedFile);
+                return;
+            }
 
             if (network == null) {
                 throw new IOException("Network is unavailable");
@@ -453,7 +502,8 @@ public class Service extends IntentService {
             PeriodicJob.resetRetryDelay(this);
         } catch (GeneralSecurityException | IOException | ServiceSpecificException e) {
             Log.e(TAG, "failed to download and install update", e);
-            notificationHandler.showFailureNotification(e.getMessage());
+            notificationHandler.showFailureNotification(e.getMessage(),
+                    e instanceof PackageChecks.NotNewerException);
             mUpdating = false;
             if (serviceIsUserInitiated) {
                 // Either the user will try again immediately or the already scheduled periodic
@@ -468,6 +518,7 @@ public class Service extends IntentService {
                 connection.disconnect();
             }
             notificationHandler.cancelProgressNotification();
+            InstallStatus.finished(pickedFile != null);
             Log.d(TAG, "release wake lock");
             wakeLock.release();
         }

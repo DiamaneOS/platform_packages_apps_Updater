@@ -24,6 +24,13 @@ final class PackageChecks {
 
     private PackageChecks() {}
 
+    /** The package is the installed build or an older one. */
+    static final class NotNewerException extends GeneralSecurityException {
+        NotNewerException() {
+            super("package is not newer than the installed build");
+        }
+    }
+
     static final class Metadata {
         long timestamp;
         String incremental;
@@ -186,7 +193,7 @@ final class PackageChecks {
             throw new GeneralSecurityException("package would erase the user's data");
         }
         if (buildDate <= 0 || metadata.timestamp <= buildDate) {
-            throw new GeneralSecurityException("package is not newer than the installed build");
+            throw new NotNewerException();
         }
         if (metadata.securityPatch == null
                 || !metadata.securityPatch.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")

@@ -215,11 +215,14 @@ public class NotificationHandler {
                 .build());
     }
 
-    void showFailureNotification(String exceptionMessage) {
+    void showFailureNotification(String exceptionMessage, boolean notNewer) {
         final int titleResId;
         final int contentResId;
 
-        switch (phase) {
+        if (notNewer) {
+            titleResId = R.string.notification_not_newer_title;
+            contentResId = R.string.notification_failed_local_text;
+        } else switch (phase) {
             case CHECK:
                 titleResId = R.string.notification_failed_check_title;
                 contentResId = R.string.notification_failed_check_text;

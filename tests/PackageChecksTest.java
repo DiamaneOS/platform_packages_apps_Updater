@@ -82,6 +82,11 @@ public final class PackageChecksTest {
                     refuses(() -> PackageChecks.requireLocalTarget(metadata(FULL), installed, "2026-09-05"));
                 }
                 refuses(() -> PackageChecks.requireLocalTarget(metadata(FULL), INSTALLED, "2026-11-05"));
+                try {
+                    PackageChecks.requireLocalTarget(metadata(FULL), 1760400001, "2026-09-05");
+                    throw new AssertionError("an older package was accepted");
+                } catch (PackageChecks.NotNewerException expected) {
+                }
                 for (String text : new String[]{FULL + "ota-downgrade=yes\n", FULL + "spl-downgrade=yes\n", FULL + "ota-wipe=yes\n",
                         FULL.replace("post-security-patch-level=2026-10-05\n", ""),
                         FULL.replace("post-security-patch-level=2026-10-05", "post-security-patch-level=October")}) {

@@ -502,7 +502,8 @@ public class Service extends IntentService {
             PeriodicJob.resetRetryDelay(this);
         } catch (GeneralSecurityException | IOException | ServiceSpecificException e) {
             Log.e(TAG, "failed to download and install update", e);
-            notificationHandler.showFailureNotification(e.getMessage());
+            notificationHandler.showFailureNotification(e.getMessage(),
+                    e instanceof PackageChecks.NotNewerException);
             mUpdating = false;
             if (serviceIsUserInitiated) {
                 // Either the user will try again immediately or the already scheduled periodic

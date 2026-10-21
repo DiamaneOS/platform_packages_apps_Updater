@@ -3,16 +3,12 @@ package app.seamlessupdate.client;
 import static android.os.Build.DEVICE;
 import static android.os.Build.FINGERPRINT;
 import static android.os.Build.VERSION.INCREMENTAL;
-import static android.os.Build.VERSION.SECURITY_PATCH;
 
 import android.app.IntentService;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Network;
 import android.net.Uri;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.ParcelFileDescriptor;
 import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.os.RecoverySystem;
@@ -24,7 +20,6 @@ import android.os.UpdateEngine.UpdateStatusConstants;
 import android.os.UpdateEngineCallback;
 import android.os.storage.StorageManager;
 import android.util.Log;
-import android.widget.Toast;
 
 import static java.net.HttpURLConnection.HTTP_NOT_FOUND;
 import static java.net.HttpURLConnection.HTTP_OK;
@@ -54,8 +49,8 @@ public class Service extends IntentService {
     private static final int CONNECT_TIMEOUT = 30000;
     private static final int READ_TIMEOUT = 30000;
     private static final File CARE_MAP_PATH = new File("/data/ota_package/care_map.pb");
-    private static final File UPDATE_PATH = new File("/data/ota_package/update.zip");
-    private static final String PREFERENCE_DOWNLOAD_FILE = "download_file";
+    static final File UPDATE_PATH = new File("/data/ota_package/update.zip");
+    static final String PREFERENCE_DOWNLOAD_FILE = "download_file";
     private static final String PREFERENCE_FAILED_INCREMENTAL = "failed_incremental";
     private static final int HTTP_RANGE_NOT_SATISFIABLE = 416;
     private static final int UPDATE_ENGINE_DOWNLOAD_STATE_INITIALIZATION_ERROR = 20;
@@ -160,7 +155,7 @@ public class Service extends IntentService {
         return entry;
     }
 
-    private void verify() throws IOException, GeneralSecurityException {
+    void verify() throws IOException, GeneralSecurityException {
         try {
             ReleaseKeys.require();
             notificationHandler.showVerifyNotification(0);
@@ -174,7 +169,7 @@ public class Service extends IntentService {
         }
     }
 
-    private static PackageChecks.Metadata readPackageMetadata(final ZipFile zipFile)
+    static PackageChecks.Metadata readPackageMetadata(final ZipFile zipFile)
             throws IOException, GeneralSecurityException {
         final PackageChecks.Metadata metadata;
         try (final InputStream input = zipFile.getInputStream(
@@ -185,7 +180,7 @@ public class Service extends IntentService {
         return metadata;
     }
 
-    private static String[] readPayloadProperties(final ZipFile zipFile)
+    static String[] readPayloadProperties(final ZipFile zipFile)
             throws IOException, GeneralSecurityException {
         try (final InputStream input = zipFile.getInputStream(
                 getEntry(zipFile, "payload_properties.txt"))) {
@@ -193,7 +188,7 @@ public class Service extends IntentService {
         }
     }
 
-    private void install(final ZipFile zipFile, final PackageChecks.Metadata metadata,
+    void install(final ZipFile zipFile, final PackageChecks.Metadata metadata,
             final String[] headerKeyValuePairs, final boolean streaming,
             final boolean incremental) throws IOException {
         Files.deleteIfExists(CARE_MAP_PATH.toPath());
@@ -221,84 +216,11 @@ public class Service extends IntentService {
         }
     }
 
-    // A picked package is copied to where downloads go, so verification, parsing and
-    // update_engine read the same bytes, no other app can change them and the card can be removed.
-    private void installFromFile(final Uri uri) throws IOException, GeneralSecurityException {
-        notificationHandler.showCopyNotification(0, 0);
-        ReleaseKeys.require();
-        // The online check must not resume a partial download onto the copy.
-        Settings.getPreferences(this).edit().remove(PREFERENCE_DOWNLOAD_FILE).commit();
-        try {
-            copyToUpdatePath(uri);
-            verify();
-            try (final ZipFile zipFile = new ZipFile(UPDATE_PATH)) {
-                final PackageChecks.Metadata metadata = readPackageMetadata(zipFile);
-                PackageChecks.requireLocalTarget(metadata,
-                        SystemProperties.getLong("ro.build.date.utc", 0), SECURITY_PATCH);
-                final String[] headerKeyValuePairs = readPayloadProperties(zipFile);
-                PackageChecks.requireLocalPayload(metadata, headerKeyValuePairs, UPDATE_PATH.length());
-                install(zipFile, metadata, headerKeyValuePairs, false, false);
-            }
-        } catch (final IOException | GeneralSecurityException | RuntimeException e) {
-            UPDATE_PATH.delete();
-            throw e;
-        }
-    }
-
-    private void copyToUpdatePath(final Uri uri) throws IOException {
-        Files.deleteIfExists(UPDATE_PATH.toPath());
-        final ParcelFileDescriptor file;
-        try {
-            file = getContentResolver().openFileDescriptor(uri, "r");
-        } catch (final SecurityException e) {
-            throw new IOException("no access to the selected file", e);
-        }
-        if (file == null) {
-            throw new IOException("unable to open the selected file");
-        }
-        try (final InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(file);
-                final FileOutputStream output = new FileOutputStream(UPDATE_PATH)) {
-            final long size = file.getStatSize();
-            if (size < 1 || size > DownloadChecks.MAX_PACKAGE_BYTES) {
-                throw new IOException("unexpected update file size: " + size);
-            }
-            try {
-                getSystemService(StorageManager.class).allocateBytes(output.getFD(), size,
-                        StorageManager.FLAG_ALLOCATE_AGGRESSIVE);
-            } catch (final IOException e) {
-                throw new IOException(getString(com.android.internal.R.string.low_memory), e);
-            }
-            notificationHandler.showCopyNotification(0, size);
-            long copied = 0;
-            long last = System.nanoTime();
-            final byte[] buffer = new byte[1024 * 1024];
-            for (int bytesRead; (bytesRead = input.read(buffer)) != -1; ) {
-                if (bytesRead > size - copied) throw new IOException("the selected file changed while it was copied");
-                output.write(buffer, 0, bytesRead);
-                copied += bytesRead;
-                final long now = System.nanoTime();
-                if (now - last > 1000 * 1000 * 1000) {
-                    notificationHandler.showCopyNotification(copied, size);
-                    last = now;
-                }
-            }
-            if (copied != size) throw new IOException("the selected file changed while it was copied");
-        }
-    }
-
     // A server that answers with anything but update information (a web page, say) fails the
     // check like an unreachable one, instead of crashing the service.
     private static String[] readMetadata(final HttpsURLConnection connection) throws IOException {
         try (final InputStream input = connection.getInputStream()) {
             return DownloadChecks.metadata(input);
-        }
-    }
-
-    // Both early returns follow an installed update that waits for the restart.
-    private void explainSkippedPick(final Uri pickedFile) {
-        if (pickedFile != null) {
-            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(this,
-                    R.string.notification_reboot_text, Toast.LENGTH_LONG).show());
         }
     }
 
@@ -332,13 +254,13 @@ public class Service extends IntentService {
 
             if (mUpdating) {
                 Log.d(TAG, "updating already, returning early");
-                explainSkippedPick(pickedFile);
+                LocalInstall.explainSkippedPick(this, pickedFile);
                 return;
             }
             final SharedPreferences preferences = Settings.getPreferences(this);
             if (preferences.getBoolean(Settings.KEY_WAITING_FOR_REBOOT, false)) {
                 Log.d(TAG, "updated already, waiting for reboot");
-                explainSkippedPick(pickedFile);
+                LocalInstall.explainSkippedPick(this, pickedFile);
                 return;
             }
             mUpdating = true;
@@ -347,7 +269,7 @@ public class Service extends IntentService {
 
             if (pickedFile != null) {
                 Log.d(TAG, "installing a picked package");
-                installFromFile(pickedFile);
+                new LocalInstall(this, notificationHandler).installFromFile(pickedFile);
                 return;
             }
 

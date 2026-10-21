@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,12 +34,6 @@ class DownloadChecksTests(unittest.TestCase):
     def test_identity_and_downgrade_fail_before_updated_claim(self): self.scenario('identity_and_downgrade')
     def test_exact_range_before_append(self): self.scenario('range')
     def test_length_bound_and_overflow(self): self.scenario('length_bounds')
-
-    def test_both_hosts_share_existing_tls_pins(self):
-        doc = ET.parse(ROOT / 'res/xml/network_security_config.xml').getroot()
-        config = doc.find('domain-config')
-        self.assertEqual({x.text for x in config.findall('domain')}, {'releases.diamaneos.de', 'releases-na.diamaneos.de'})
-        self.assertTrue(config.findall('pin-set/pin'))
 
 
 if __name__ == '__main__': unittest.main()

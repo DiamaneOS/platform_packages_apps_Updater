@@ -6,7 +6,7 @@ A missing or unknown policy selects Automatic. If the policy cannot be read, no 
 
 Automatic sends HEAD for the channel metadata to both servers and starts on the faster. A connection or temporary server failure before the body moves to the other server. A package download that fails or stalls mid-way continues there from the same offset, with the exact `Content-Range` of a package of the same size.
 
-TLS pins cover both origins. TLS failures and redirects are refused and never move to the other server. Parsing and verification failures do not either.
+TLS pins cover both origins (vendor/diamaneos DiamaneOSUpdaterOverlay sets them). TLS failures and redirects are refused and never move to the other server. Parsing and verification failures do not either.
 
 Selectors are bounded, untrusted hints. Older timestamps and inconsistent identity fail. Native signed OTA verification of the whole package authorizes installation. HTTP streaming is disabled. Resumed downloads require exact ranges and bounded length. Settings' `DiamaneOSDownloadPolicyClient` supplies the public-SDK policy reader.
 

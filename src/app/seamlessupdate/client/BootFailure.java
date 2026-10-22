@@ -40,6 +40,8 @@ final class BootFailure {
      * At boot, with the running build time. Only the first boot after an install counts, and only
      * when the phone runs the build it ran before. True when the installed update did not start
      * for the second time in a row.
+     * Runs at LOCKED_BOOT_COMPLETED, after vold marked the slot successful. An unmarked boot loses
+     * this write to the userdata checkpoint, so the fallback still counts.
      */
     static boolean booted(final SharedPreferences preferences, final long date) {
         final SharedPreferences.Editor editor = preferences.edit();

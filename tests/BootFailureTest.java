@@ -36,6 +36,16 @@ public final class BootFailureTest {
     private static void install(Preferences p, String target, long date) { BootFailure.installed(p, target, date, D5); }
     private static boolean fail(Preferences p) { install(p, S6, D6); return BootFailure.booted(p, D5); }
 
+    // S6 boots and the boot hook runs, but the slot is never marked successful. The userdata
+    // checkpoint undoes that boot's writes when the bootloader goes back to S5.
+    private static boolean failAfterHook(Preferences p) {
+        install(p, S6, D6);
+        final Preferences boot = new Preferences();
+        boot.values.putAll(p.values);
+        check(!BootFailure.booted(boot, D6) && boot.values.isEmpty());
+        return BootFailure.booted(p, D5);
+    }
+
     public static void main(String[] args) {
         switch (args[0]) {
             case "started": {
@@ -127,6 +137,40 @@ public final class BootFailureTest {
                 Preferences p = new Preferences();
                 BootFailure.installed(p, null, D6, D5);
                 check(!BootFailure.booted(p, D5) && p.values.isEmpty());
+                break;
+            }
+            case "marked_clears": {
+                // The marked boot keeps its writes: nothing left, later boots count nothing.
+                Preferences p = new Preferences();
+                install(p, S6, D6);
+                check(!BootFailure.booted(p, D6) && p.values.isEmpty());
+                check(!BootFailure.booted(p, D6) && !BootFailure.blocked(p, S6, D6));
+                break;
+            }
+            case "fallback_after_hook_counts": {
+                Preferences p = new Preferences();
+                check(!failAfterHook(p));
+                check(p.values.get("boot_failures").equals(1) && BootFailure.blockedBuild(p) == null);
+                break;
+            }
+            case "second_fallback_after_hook_blocks": {
+                Preferences p = new Preferences();
+                check(!failAfterHook(p));
+                check(failAfterHook(p));
+                check(BootFailure.blocked(p, S6, D6) && S6.equals(BootFailure.blockedBuild(p)));
+                break;
+            }
+            case "block_after_hook_ends": {
+                // Another build installed ends the block.
+                Preferences p = new Preferences();
+                failAfterHook(p); failAfterHook(p);
+                install(p, S7, D7);
+                check(!BootFailure.blocked(p, S6, D6) && BootFailure.blockedBuild(p) == null);
+                // A newer build running ends it too.
+                p = new Preferences();
+                failAfterHook(p); failAfterHook(p);
+                check(!BootFailure.booted(p, D7) && BootFailure.blockedBuild(p) == null);
+                check(p.values.isEmpty());
                 break;
             }
             default: throw new AssertionError(args[0]);

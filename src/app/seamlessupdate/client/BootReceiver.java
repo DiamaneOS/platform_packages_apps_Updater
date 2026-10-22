@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.os.SystemProperties;
 import android.os.UserManager;
 
 public class BootReceiver extends BroadcastReceiver {
@@ -13,6 +14,10 @@ public class BootReceiver extends BroadcastReceiver {
         if (context.getSystemService(UserManager.class).isSystemUser()) {
             final SharedPreferences preferences = Settings.getPreferences(context);
             preferences.edit().putBoolean(Settings.KEY_WAITING_FOR_REBOOT, false).apply();
+            if (BootFailure.booted(preferences, SystemProperties.getLong("ro.build.date.utc", 0))) {
+                NotificationHandler.showBootFailedNotification(context,
+                        BootFailure.blockedBuild(preferences));
+            }
             PeriodicJob.schedule(context);
             // DiamaneOS publishes no security preview releases, so there is nothing to opt into.
         } else {

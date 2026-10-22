@@ -91,7 +91,7 @@ public class Service extends IntentService {
         connection.setRequestProperty("Accept-Encoding", "identity");
     }
 
-    private void applyUpdate(final boolean streaming, final long payloadOffset,
+    private void applyUpdate(final boolean streaming, final PackageChecks.Metadata metadata,
             final String[] headerKeyValuePairs, final boolean incremental) throws IOException {
         if (streaming) throw new IOException("Remote streaming is unsupported by the bounded transport");
         notificationHandler.showInstallNotification(0);
@@ -119,6 +119,8 @@ public class Service extends IntentService {
                 this.errorCode = errorCode;
                 if (errorCode == ErrorCodeConstants.SUCCESS) {
                     UPDATE_PATH.delete();
+                    BootFailure.installed(Settings.getPreferences(Service.this), metadata.incremental,
+                            metadata.timestamp, SystemProperties.getLong("ro.build.date.utc", 0));
                     annoyUser();
                 } else {
                     UPDATE_PATH.delete();
@@ -133,7 +135,7 @@ public class Service extends IntentService {
         };
         engine.bind(callback);
         UPDATE_PATH.setReadable(true, false);
-        engine.applyPayload("file://" + UPDATE_PATH, payloadOffset, 0, headerKeyValuePairs);
+        engine.applyPayload("file://" + UPDATE_PATH, metadata.payloadOffset, 0, headerKeyValuePairs);
         try {
             monitor.await();
         } catch (InterruptedException e) {}
@@ -199,7 +201,7 @@ public class Service extends IntentService {
             Files.copy(zipFile.getInputStream(careMapEntry), CARE_MAP_PATH.toPath());
             CARE_MAP_PATH.setReadable(true, false);
         }
-        applyUpdate(streaming, metadata.payloadOffset, headerKeyValuePairs, incremental);
+        applyUpdate(streaming, metadata, headerKeyValuePairs, incremental);
     }
 
     private void onDownloadFinished(final boolean streaming, final long targetBuildDate,
@@ -229,6 +231,7 @@ public class Service extends IntentService {
         PeriodicJob.resetRetryDelay(this);
         final SharedPreferences preferences = Settings.getPreferences(this);
         preferences.edit().putBoolean(Settings.KEY_WAITING_FOR_REBOOT, true).apply();
+        NotificationHandler.cancelBootFailedNotification(this);
         if (Settings.getIdleReboot(this)) {
             IdleReboot.schedule(this);
         }
@@ -297,6 +300,15 @@ public class Service extends IntentService {
                 PeriodicJob.resetRetryDelay(this);
                 notificationHandler.showUpdatedNotification(channel);
                 Log.d(TAG, "targetBuildDate: " + targetBuildDate + " not higher than sourceBuildDate: " + sourceBuildDate);
+                mUpdating = false;
+                return;
+            }
+
+            if (!serviceIsUserInitiated
+                    && BootFailure.blocked(preferences, targetIncremental, targetBuildDate)) {
+                Log.d(TAG, "update to " + targetIncremental + " did not start twice, skipped");
+                PeriodicJob.resetRetryDelay(this);
+                NotificationHandler.showBootFailedNotification(this, targetIncremental);
                 mUpdating = false;
                 return;
             }

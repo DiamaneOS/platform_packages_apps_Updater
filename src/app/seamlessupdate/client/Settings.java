@@ -159,8 +159,13 @@ public class Settings extends CollapsingToolbarBaseActivity {
             getPreferenceManager().setStorageDeviceProtected();
             setPreferencesFromResource(R.xml.settings, rootKey);
 
+            final String failedBuild = BootFailure.blockedBuild(getPreferences(requireContext()));
             if (!ReleaseKeys.trusted()) {
                 requirePreference(KEY_CHECK_FOR_UPDATES).setSummary(R.string.check_for_updates_summary_untrusted_build);
+            } else if (failedBuild != null
+                    && !getPreferences(requireContext()).getBoolean(KEY_WAITING_FOR_REBOOT, false)) {
+                requirePreference(KEY_CHECK_FOR_UPDATES).setSummary(
+                        getString(R.string.check_for_updates_summary_boot_failed, failedBuild));
             }
 
             requirePreference("download_servers").setOnPreferenceClickListener(pref -> {

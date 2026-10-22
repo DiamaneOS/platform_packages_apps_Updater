@@ -296,7 +296,7 @@ public class Service extends IntentService {
             final String targetIncremental = metadata[0];
             final long targetBuildDate = Long.parseLong(metadata[1]);
             final long sourceBuildDate = SystemProperties.getLong("ro.build.date.utc", 0);
-            if (!DownloadChecks.newer(metadata, DEVICE, channel, INCREMENTAL, sourceBuildDate)) {
+            if (!DownloadChecks.newer(metadata, DEVICE, channel, sourceBuildDate)) {
                 PeriodicJob.resetRetryDelay(this);
                 notificationHandler.showUpdatedNotification(channel);
                 Log.d(TAG, "targetBuildDate: " + targetBuildDate + " not higher than sourceBuildDate: " + sourceBuildDate);

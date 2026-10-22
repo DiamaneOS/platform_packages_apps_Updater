@@ -9,6 +9,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.drawable.Icon;
+import android.os.Build;
 import android.text.Html;
 import android.text.Spanned;
 
@@ -31,6 +32,8 @@ public class NotificationHandler {
     private static final int NOTIFICATION_ID_UPDATED = 4;
     private static final int MAX_NOTIFICATION_ID_FOR_SERVICE = NOTIFICATION_ID_UPDATED;
     private static final int NOTIFICATION_ID_SET_SECURITY_PREVIEW = 1000;
+    // Not one of the service's IDs: a check keeps it, an installed update replaces it.
+    private static final int NOTIFICATION_ID_BOOT_FAILED = 1001;
     private static final String NOTIFICATION_CHANNEL_ID_PROGRESS = "progress";
     private static final String NOTIFICATION_CHANNEL_ID_REBOOT = "updates2";
     private static final String NOTIFICATION_CHANNEL_ID_FAILURE = "failure";
@@ -281,6 +284,27 @@ public class NotificationHandler {
                 .setShowWhen(true)
                 .setSmallIcon(R.drawable.security_update_warning_fill0_wght400_grad0_opsz48)
                 .build());
+    }
+
+    // The installed update did not start twice: Check for updates installs it again.
+    static void showBootFailedNotification(final Context context, final String build) {
+        final String text = context.getString(R.string.notification_boot_failed_text, build,
+                Build.VERSION.INCREMENTAL);
+        context.getSystemService(NotificationManager.class).notify(NOTIFICATION_ID_BOOT_FAILED,
+                new Notification.Builder(context, NOTIFICATION_CHANNEL_ID_FAILURE)
+                .setContentIntent(PendingIntent.getActivity(context, PENDING_SETTINGS_ID,
+                        new Intent(context, Settings.class), PendingIntent.FLAG_IMMUTABLE))
+                .setContentTitle(context.getString(R.string.notification_boot_failed_title))
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setOnlyAlertOnce(true)
+                .setShowWhen(true)
+                .setSmallIcon(R.drawable.security_update_warning_fill0_wght400_grad0_opsz48)
+                .build());
+    }
+
+    static void cancelBootFailedNotification(final Context context) {
+        context.getSystemService(NotificationManager.class).cancel(NOTIFICATION_ID_BOOT_FAILED);
     }
 
     private PendingIntent getPendingSettingsIntent() {

@@ -50,6 +50,10 @@ class BootFailureTests(unittest.TestCase):
     def test_older_build_flashed_is_no_failure(self): self.scenario('other_old_build_runs')
     def test_fallback_told_by_build_time(self): self.scenario('same_name_older_date')
     def test_package_without_incremental(self): self.scenario('no_incremental')
+    def test_marked_boot_clears(self): self.scenario('marked_clears')
+    def test_fallback_after_hook_counts(self): self.scenario('fallback_after_hook_counts')
+    def test_second_fallback_after_hook_blocks(self): self.scenario('second_fallback_after_hook_blocks')
+    def test_block_after_hook_ends(self): self.scenario('block_after_hook_ends')
 
 
 if __name__ == '__main__': unittest.main()

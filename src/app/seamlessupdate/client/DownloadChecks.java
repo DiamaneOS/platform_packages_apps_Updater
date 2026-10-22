@@ -37,16 +37,13 @@ final class DownloadChecks {
     }
 
     static boolean newer(String[] metadata, String device, String channel,
-            String current, long sourceDate) throws GeneralSecurityException {
+            long sourceDate) throws GeneralSecurityException {
         if (!device.equals(metadata[2]) || !channel.equals(metadata[3])) {
             throw new GeneralSecurityException("Update device or channel does not match");
         }
-        long targetDate = Long.parseLong(metadata[1]);
-        if (sourceDate < 0 || targetDate < sourceDate
-                || (targetDate == sourceDate && !current.equals(metadata[0]))) {
-            throw new GeneralSecurityException("Update information is older or inconsistent");
-        }
-        return targetDate > sourceDate;
+        // As GrapheneOS: a line no newer than the running build is up to date, as after a
+        // switch back from a channel that is ahead.
+        return Long.parseLong(metadata[1]) > sourceDate;
     }
 
     static long length(int code, long received, long length, String range) throws IOException {

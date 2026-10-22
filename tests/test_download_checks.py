@@ -31,7 +31,7 @@ class DownloadChecksTests(unittest.TestCase):
     def test_selector_hints_never_supply_urls(self): self.scenario('metadata')
     def test_selector_bound_and_encoding(self): self.scenario('metadata_bounds')
     def test_timestamp_ascii_and_long_range(self): self.scenario('metadata_timestamp')
-    def test_identity_and_downgrade_fail_before_updated_claim(self): self.scenario('identity_and_downgrade')
+    def test_identity_fails_and_older_is_up_to_date(self): self.scenario('identity_and_downgrade')
     def test_exact_range_before_append(self): self.scenario('range')
     def test_length_bound_and_overflow(self): self.scenario('length_bounds')
 

@@ -30,6 +30,8 @@
     <string name="notification_failed_local_text">The selected update wasn\'t installed. The installed system is unchanged.</string>
     <string name="notification_untrusted_build_title">Updates won\'t be installed</string>
     <string name="notification_untrusted_build_text">This build is signed with Android\'s public test keys, so anyone could sign an update it would accept. The update system checks for updates but won\'t download or install them.</string>
+    <string name="notification_boot_failed_title">Update couldn\'t start</string>
+    <string name="notification_boot_failed_text">The update to %1$s couldn\'t start. The phone went back to %2$s and works as before. To try again, check for updates.</string>
     <string name="notification_set_security_preview_title">Security preview releases</string>
     <string name="notification_set_security_preview_text">Tap to choose whether to opt into security preview releases</string>
     <string name="settings_title">System update</string>
@@ -54,6 +56,7 @@
     <string name="check_for_updates_title">Check for updates</string>
     <string name="check_for_updates_summary">Tap to check for updates</string>
     <string name="check_for_updates_summary_untrusted_build">Tap to check for updates. This build is signed with public test keys, so updates won\'t be downloaded or installed</string>
+    <string name="check_for_updates_summary_boot_failed">The update to %1$s couldn\'t start. Tap to try again</string>
     <string name="install_from_file_title">Install from storage</string>
     <string name="install_from_file_summary">Pick an update file on a microSD card or USB drive</string>
     <string name="install_from_file_progress">%1$s · %2$s</string>

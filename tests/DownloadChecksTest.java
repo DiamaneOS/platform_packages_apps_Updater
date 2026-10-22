@@ -45,10 +45,13 @@ public final class DownloadChecksTest {
                 refuses(() -> metadata(boundary + "\n"));
                 break;
             case "identity_and_downgrade":
-                check(DownloadChecks.newer(metadata("next 11 FP6 stable"), "FP6", "stable", "current", 10));
-                check(!DownloadChecks.newer(metadata("current 10 FP6 stable"), "FP6", "stable", "current", 10));
-                for (String text : new String[]{"old 9 FP6 stable", "wrong 10 FP6 stable", "current 10 other stable", "current 10 FP6 beta"}) {
-                    refuses(() -> DownloadChecks.newer(metadata(text), "FP6", "stable", "current", 10));
+                check(DownloadChecks.newer(metadata("next 11 FP6 stable"), "FP6", "stable", 10));
+                check(!DownloadChecks.newer(metadata("current 10 FP6 stable"), "FP6", "stable", 10));
+                // Older or same build time, also under another name: up to date, not a failure.
+                check(!DownloadChecks.newer(metadata("old 9 FP6 stable"), "FP6", "stable", 10));
+                check(!DownloadChecks.newer(metadata("other 10 FP6 stable"), "FP6", "stable", 10));
+                for (String text : new String[]{"current 10 other stable", "current 10 FP6 beta", "next 11 other stable", "next 11 FP6 beta"}) {
+                    refuses(() -> DownloadChecks.newer(metadata(text), "FP6", "stable", 10));
                 }
                 break;
             case "range":

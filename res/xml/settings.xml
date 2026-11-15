@@ -1,5 +1,15 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <!-- What the service is doing or how its last run ended. Filled in by Settings. -->
+    <Preference app:key="update_status"
+            app:isPreferenceVisible="false"
+            app:selectable="false"
+            app:iconSpaceReserved="false" />
+
+    <Preference app:key="whats_new"
+            app:isPreferenceVisible="false"
+            app:iconSpaceReserved="false" />
+
     <Preference app:key="check_for_updates"
             app:title="@string/check_for_updates_title"
             app:summary="@string/check_for_updates_summary"
@@ -8,6 +18,11 @@
     <Preference app:key="install_from_file"
             app:title="@string/install_from_file_title"
             app:summary="@string/install_from_file_summary"
+            app:iconSpaceReserved="false" />
+
+    <Preference app:key="release_notes"
+            app:title="@string/release_notes_title"
+            app:isPreferenceVisible="false"
             app:iconSpaceReserved="false" />
 
     <PreferenceCategory app:title="@string/settings_header"

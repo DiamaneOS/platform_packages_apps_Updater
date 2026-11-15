@@ -79,6 +79,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Opened only from the Updater's own screen. -->
+        <activity android:name=".ReleaseNotesActivity"
+                android:excludeFromRecents="true"
+                android:exported="false" />
+
         <!-- DiamaneOS publishes no security preview releases. The activity is disabled, so
              the setup wizard skips its opt-in step. -->
         <activity android:name=".SecurityPreviewSettings"

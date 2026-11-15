@@ -61,6 +61,17 @@
     <string name="install_from_file_summary">Pick an update file on a microSD card or USB drive</string>
     <string name="install_from_file_progress">%1$s · %2$s</string>
     <string name="install_from_file_busy">An update is already being installed</string>
+    <string name="install_from_file_summary_untrusted_build">Not available. This build is signed with public test keys, so it installs no update</string>
+    <string name="update_busy_summary">An update is in progress</string>
+    <string name="update_waiting_summary">Restart the phone first to finish the installed update</string>
+    <string name="status_title">System update</string>
+    <string name="status_target_title">Update %s</string>
+    <string name="status_available_title">Update %s is available</string>
+    <string name="status_last_checked">Last checked %s</string>
+    <string name="whats_new_title">What\'s new in %s</string>
+    <string name="release_notes_title">Release notes</string>
+    <string name="release_notes_title_build">Release notes of %s</string>
+    <string name="release_notes_summary">Installed release %s</string>
     <string name="notification_settings_title">Notification settings</string>
     <string name="notification_settings_summary">Modify notification channel settings</string>
     <string name="use_security_preview_channel_title">Receive security preview releases</string>

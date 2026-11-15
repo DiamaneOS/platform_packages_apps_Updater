@@ -32,6 +32,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -46,8 +47,12 @@ public class Service extends IntentService {
     private static final String TAG = "Service";
     static final String INTENT_EXTRA_NETWORK = "network";
     static final String INTENT_EXTRA_IS_USER_INITIATED = "is_user_initiated";
+    // The screen reserved the service for this check with InstallStatus.claimCheck().
+    static final String INTENT_EXTRA_CLAIMED_CHECK = "claimed_check";
     private static final int CONNECT_TIMEOUT = 30000;
     private static final int READ_TIMEOUT = 30000;
+    // Release notes are a small extra: they never hold up an update for long.
+    private static final int NOTES_TIMEOUT = 5000;
     private static final File CARE_MAP_PATH = new File("/data/ota_package/care_map.pb");
     static final File UPDATE_PATH = new File("/data/ota_package/update.zip");
     static final String PREFERENCE_DOWNLOAD_FILE = "download_file";
@@ -60,6 +65,8 @@ public class Service extends IntentService {
     private NotificationHandler notificationHandler;
     private boolean mUpdating = false;
     private DownloadTransport.Route route;
+    // A route of its own, so a failed notes request never moves the update to the other server.
+    private DownloadTransport.Route notesRoute;
 
     public Service() {
         super(TAG);
@@ -91,6 +98,84 @@ public class Service extends IntentService {
         connection.setRequestProperty("Accept-Encoding", "identity");
     }
 
+    private void configureNotes(final HttpsURLConnection connection) {
+        configure(connection);
+        connection.setConnectTimeout(NOTES_TIMEOUT);
+        connection.setReadTimeout(NOTES_TIMEOUT);
+    }
+
+    /**
+     * Stores the release notes of a build, if the servers have them and they are plain text. Any
+     * failure only leaves the notes out: it never fails or delays the update past the timeouts.
+     */
+    // retryMissing: a check the user started asks again for notes the servers once did not have,
+    // as notes can be put up after a release. The periodic job does not.
+    private void fetchNotes(final Network network, final String build, final long date,
+            final boolean retryMissing) {
+        final String key = ReleaseNotes.key(build, date);
+        final String name = ReleaseNotes.fileName(DEVICE, build);
+        if (key == null || name == null || notesRoute == null
+                || NotesStore.has(this, key) || (!retryMissing && NotesStore.missing(this, key))) {
+            return;
+        }
+        HttpsURLConnection connection = null;
+        try {
+            connection = DownloadTransport.open(notesRoute, name, 0, connector(network), this::configureNotes);
+            final int code = connection.getResponseCode();
+            if (code == HTTP_NOT_FOUND) {
+                NotesStore.markMissing(this, key);
+                return;
+            }
+            if (code != HTTP_OK) {
+                Log.w(TAG, "release notes " + name + ": HTTP " + code);
+                return;
+            }
+            final byte[] bytes;
+            try (final InputStream input = connection.getInputStream()) {
+                bytes = DownloadTransport.readBounded(input, ReleaseNotes.MAX_BYTES);
+            }
+            NotesStore.write(this, key, ReleaseNotes.text(bytes));
+            Log.d(TAG, "stored release notes of " + build);
+        } catch (IOException | RuntimeException e) {
+            Log.w(TAG, "release notes of " + build + " left out", e);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    /**
+     * Whether the update engine holds an applied update that waits for a restart. It outlives this
+     * process: an update it finished while the Updater was killed never reached annoyUser().
+     */
+    private static boolean engineWaitsForReboot() {
+        final UpdateEngine engine = new UpdateEngine();
+        final CountDownLatch first = new CountDownLatch(1);
+        final int[] status = {-1};
+        final var callback = new UpdateEngineCallback() {
+            @Override
+            public void onStatusUpdate(int value, float percent) {
+                if (first.getCount() > 0) {
+                    status[0] = value;
+                    first.countDown();
+                }
+            }
+
+            @Override
+            public void onPayloadApplicationComplete(int errorCode) {}
+        };
+        try {
+            if (!engine.bind(callback)) return false;
+            first.await(2, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "cannot read the update engine's state", e);
+        } finally {
+            engine.unbind();
+        }
+        return status[0] == UpdateStatusConstants.UPDATED_NEED_REBOOT;
+    }
+
     private void applyUpdate(final boolean streaming, final PackageChecks.Metadata metadata,
             final String[] headerKeyValuePairs, final boolean incremental) throws IOException {
         if (streaming) throw new IOException("Remote streaming is unsupported by the bounded transport");
@@ -110,6 +195,10 @@ public class Service extends IntentService {
                     notificationHandler.showValidateNotification(Math.round(percent * 100));
                 } else if (status == UpdateStatusConstants.FINALIZING) {
                     notificationHandler.showFinalizeNotification(Math.round(percent * 100));
+                } else if (status != UpdateStatusConstants.IDLE
+                        && status != UpdateStatusConstants.UPDATED_NEED_REBOOT) {
+                    // Cleaning up the previous update and the like: a step without progress.
+                    notificationHandler.showInstallNotification(-1);
                 }
             }
 
@@ -247,6 +336,8 @@ public class Service extends IntentService {
         final Uri pickedFile = intent.getData();
         final var serviceIsUserInitiated = pickedFile != null
                 || intent.getBooleanExtra(INTENT_EXTRA_IS_USER_INITIATED, false);
+        final boolean claimedCheck = pickedFile == null
+                && intent.getBooleanExtra(INTENT_EXTRA_CLAIMED_CHECK, false);
         if (serviceIsUserInitiated) Log.d(TAG, "onHandleIntent() – service is user-initiated");
 
         final PowerManager pm = getSystemService(PowerManager.class);
@@ -267,8 +358,16 @@ public class Service extends IntentService {
                 return;
             }
             mUpdating = true;
-            InstallStatus.started();
+            InstallStatus.started(pickedFile != null || claimedCheck, System.currentTimeMillis());
             notificationHandler.start(pickedFile != null);
+
+            if (engineWaitsForReboot()) {
+                Log.d(TAG, "the update engine holds an applied update, waiting for reboot");
+                LocalInstall.explainSkippedPick(this, pickedFile);
+                annoyUser();
+                mUpdating = false;
+                return;
+            }
 
             if (pickedFile != null) {
                 Log.d(TAG, "installing a picked package");
@@ -284,6 +383,9 @@ public class Service extends IntentService {
             // Automatic probes the channel metadata on both servers and starts on the faster.
             route = DownloadTransport.route(DownloadPolicyClient.read(this), false,
                     DEVICE + "-" + channel, connector(network), this::configure);
+            // The same server order: route() keeps it a while, so this makes no request.
+            notesRoute = DownloadTransport.route(DownloadPolicyClient.read(this), false,
+                    DEVICE + "-" + channel, connector(network), this::configure);
 
             Log.d(TAG, "fetching metadata for " + DEVICE + "-" + channel + " from " + route.server());
             connection = fetchData(network, DEVICE + "-" + channel);
@@ -298,6 +400,12 @@ public class Service extends IntentService {
             final long sourceBuildDate = SystemProperties.getLong("ro.build.date.utc", 0);
             if (!DownloadChecks.newer(metadata, DEVICE, channel, sourceBuildDate)) {
                 PeriodicJob.resetRetryDelay(this);
+                NotesStore.clearTarget(this);
+                preferences.edit().putLong(NotesStore.KEY_LAST_CHECK, System.currentTimeMillis()).apply();
+                // Asking for the running build's notes tells the server which build this phone
+                // runs, so only a check the user started does it.
+                if (serviceIsUserInitiated) fetchNotes(network, INCREMENTAL, sourceBuildDate, true);
+                NotesStore.prune(this);
                 notificationHandler.showUpdatedNotification(channel);
                 Log.d(TAG, "targetBuildDate: " + targetBuildDate + " not higher than sourceBuildDate: " + sourceBuildDate);
                 mUpdating = false;
@@ -308,6 +416,8 @@ public class Service extends IntentService {
                     && BootFailure.blocked(preferences, targetIncremental, targetBuildDate)) {
                 Log.d(TAG, "update to " + targetIncremental + " did not start twice, skipped");
                 PeriodicJob.resetRetryDelay(this);
+                NotesStore.clearTarget(this);
+                InstallStatus.show(R.string.notification_boot_failed_title, -1);
                 NotificationHandler.showBootFailedNotification(this, targetIncremental);
                 mUpdating = false;
                 return;
@@ -316,7 +426,13 @@ public class Service extends IntentService {
             // Never download an update this build could not tell from a forged one.
             ReleaseKeys.require();
 
-            notificationHandler.showDownloadNotification(0, 100);
+            NotesStore.setTarget(this, targetIncremental, targetBuildDate);
+            InstallStatus.target(targetIncremental);
+            fetchNotes(network, targetIncremental, targetBuildDate, serviceIsUserInitiated);
+            NotesStore.prune(this);
+
+            // The size is not known yet: no percentage.
+            notificationHandler.showDownloadNotification(0, 0);
 
             String downloadFile = preferences.getString(PREFERENCE_DOWNLOAD_FILE, null);
             long downloaded;
@@ -430,6 +546,7 @@ public class Service extends IntentService {
             onDownloadFinished(streaming, targetBuildDate, targetIncremental);
         } catch (ReleaseKeys.UntrustedBuildException e) {
             Log.w(TAG, "not downloading or installing updates: " + e.getMessage());
+            NotesStore.clearTarget(this);
             notificationHandler.showUntrustedBuildNotification();
             mUpdating = false;
             // A property of this build: a retry before the next periodic check changes nothing.
@@ -452,7 +569,7 @@ public class Service extends IntentService {
                 connection.disconnect();
             }
             notificationHandler.cancelProgressNotification();
-            InstallStatus.finished(pickedFile != null);
+            InstallStatus.finished(pickedFile != null, claimedCheck);
             Log.d(TAG, "release wake lock");
             wakeLock.release();
         }

@@ -90,10 +90,11 @@ public class NotificationHandler {
         notificationManager.createNotificationChannels(channels);
     }
 
+    // progress below 0, or max 0 or below: a step without known progress.
     private Notification buildProgressNotification(int resId, long progress, long max) {
-        if (local) {
-            InstallStatus.show(resId, max <= 0 ? -1 : (int) (100 * (double) progress / max));
-        }
+        if (progress < 0) max = 0;
+        // The screen shows the same step as the notification, for online updates and picked packages.
+        InstallStatus.show(resId, max <= 0 ? -1 : (int) (100 * (double) progress / max));
         Notification.Builder builder = new Notification.Builder(service, NOTIFICATION_CHANNEL_ID_PROGRESS)
                 .setContentIntent(getPendingSettingsIntent())
                 .setContentTitle(service.getString(resId))
@@ -115,10 +116,10 @@ public class NotificationHandler {
     void start(final boolean local) {
         phase = Phase.CHECK;
         this.local = local;
-        // A picked package shows at once, on the screen and in the notification.
+        // The first step shows at once, on the screen and in the notification.
         final int titleResId = local ? com.android.internal.R.string.reboot_to_update_package
                 : R.string.notification_check_title;
-        InstallStatus.show(local ? titleResId : 0, -1);
+        InstallStatus.show(titleResId, -1);
 
         // Avoid cancelling persistent security settings preview notification
         for (int id = 1; id <= MAX_NOTIFICATION_ID_FOR_SERVICE; id++) {
@@ -147,6 +148,7 @@ public class NotificationHandler {
             channelText = channel;
         }
 
+        InstallStatus.show(R.string.notification_updated_title, -1);
         notificationManager.notify(NOTIFICATION_ID_UPDATED, new Notification.Builder(service, NOTIFICATION_CHANNEL_ID_UPDATED)
                 .setContentIntent(getPendingSettingsIntent())
                 .setContentTitle(service.getString(R.string.notification_updated_title))
@@ -195,9 +197,7 @@ public class NotificationHandler {
     }
 
     void showRebootNotification() {
-        if (local) {
-            InstallStatus.show(R.string.notification_reboot_title, -1);
-        }
+        InstallStatus.show(R.string.notification_reboot_title, -1);
         final PendingIntent reboot = PendingIntent.getBroadcast(service, PENDING_REBOOT_ID,
                         new Intent(service, RebootReceiver.class), PendingIntent.FLAG_IMMUTABLE);
 
@@ -253,9 +253,8 @@ public class NotificationHandler {
                         : R.string.notification_failed_install_text;
         }
 
-        if (local) {
-            InstallStatus.show(titleResId, -1);
-        }
+        // The screen shows the title only. The error text stays in the notification.
+        InstallStatus.show(titleResId, -1);
         String text = service.getString(contentResId) + "<br><br><tt>" + exceptionMessage + "</tt>";
         Spanned styledText = Html.fromHtml(text, Html.FROM_HTML_MODE_LEGACY);
 
@@ -271,9 +270,7 @@ public class NotificationHandler {
     }
 
     void showUntrustedBuildNotification() {
-        if (local) {
-            InstallStatus.show(R.string.notification_untrusted_build_title, -1);
-        }
+        InstallStatus.show(R.string.notification_untrusted_build_title, -1);
         final String text = service.getString(R.string.notification_untrusted_build_text);
         notificationManager.notify(NOTIFICATION_ID_FAILURE, new Notification.Builder(service, NOTIFICATION_CHANNEL_ID_FAILURE)
                 .setContentIntent(getPendingSettingsIntent())

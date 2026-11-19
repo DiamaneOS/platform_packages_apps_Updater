@@ -23,12 +23,12 @@ public final class ReleaseNotesTest {
     public static void main(String[] args) throws Exception {
         switch (args[0]) {
             case "names":
-                check("FP6-release-notes-2026111400.txt".equals(ReleaseNotes.fileName("FP6", "2026111400")));
+                check("sample-release-notes-2026111400.txt".equals(ReleaseNotes.fileName("sample", "2026111400")));
                 // Only plain build numbers and device names make a file name, never a path.
                 for (String build : new String[] {null, "", "../x", "2026111400.txt", "20261114a", "1234567890123456789", " 2026111400"}) {
-                    check(ReleaseNotes.fileName("FP6", build) == null);
+                    check(ReleaseNotes.fileName("sample", build) == null);
                 }
-                for (String device : new String[] {null, "", "FP6/..", "FP 6", "FP6.x"}) {
+                for (String device : new String[] {null, "", "sample/..", "sam ple", "sample.x"}) {
                     check(ReleaseNotes.fileName(device, "2026111400") == null);
                 }
                 // The cache name holds the build date too, so a rebuild under the same number is another entry.
@@ -37,7 +37,7 @@ public final class ReleaseNotesTest {
                 check(ReleaseNotes.key("2026111400", 0) == null && ReleaseNotes.key("x", 5) == null && ReleaseNotes.key(null, 5) == null);
                 break;
             case "text":
-                final String notes = "Changes since the 2026110600 release:\n\n- Fairphone 6: faster starts.\n  - Ümlauts, “quotes”, 3 % and CVE-2026-1 stay.\n";
+                final String notes = "Changes since the 2026110600 release:\n\n- Camera: faster starts.\n  - Ümlauts, “quotes”, 3 % and CVE-2026-1 stay.\n";
                 check(notes.equals(ReleaseNotes.text(notes.getBytes(StandardCharsets.UTF_8))));
                 // Not UTF-8, empty, blank, too large or too many lines: refused whole.
                 check(refused(new byte[] {(byte) 0xc3, 0x28}));
